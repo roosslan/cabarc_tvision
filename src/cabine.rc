@@ -1,0 +1,33 @@
+#pragma code_page(65001)
+
+#include <winver.h>
+#include "version.h"
+
+1 ICON "../TURBO.ICO"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     CABINE_VERSION_MAJOR, CABINE_VERSION_MINOR, 0, 0
+PRODUCTVERSION  CABINE_VERSION_MAJOR, CABINE_VERSION_MINOR, 0, 0
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "041904B0"
+        BEGIN
+            VALUE "CompanyName",      "rasa, www.sborka.dev"
+            VALUE "FileDescription",  "Cabine — файловый менеджер и архиватор CAB"
+            VALUE "FileVersion",      CABINE_VERSION
+            VALUE "LegalCopyright",   CABINE_COPYRIGHT
+            VALUE "ProductName",      "Cabine"
+            VALUE "ProductVersion",   CABINE_VERSION
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0419, 1200
+    END
+END
