@@ -23,6 +23,7 @@
 #include "format.h"
 #include "fsutil.h"
 #include "panel.h"
+#include "sfxstub.h"
 #include "viewer.h"
 
 namespace {
@@ -136,7 +137,9 @@ std::string propertiesText(const CabInfo &i, const std::string &display)
     t += "Размер:           " + formatNumber(i.fileSize) + " байт (" + formatSize(i.fileSize) + ")\n";
     t += "Файлов:           " + formatNumber(i.entries.size()) + "\n";
     t += "Исходный размер:  " + formatNumber(i.totalSize) + " байт (" + formatSize(i.totalSize) + ")\n";
-    t += "Степень сжатия:   " + formatRatio(i.fileSize, i.totalSize) + "\n";
+    if (i.offset)
+        t += "Распаковщик:      " + formatNumber(i.offset) + " байт (самораспаковывающийся архив)\n";
+    t += "Степень сжатия:   " + formatRatio(i.fileSize - i.offset, i.totalSize) + "\n";
     t += "Метод сжатия:     " + i.method + "\n";
     t += "Блоков (папок):   " + formatNumber(i.folders) + "\n";
     t += "Набор:            ID " + std::to_string(i.setID) + ", том " + std::to_string(i.iCabinet + 1);
@@ -288,8 +291,10 @@ public:
         if (win->archiveMode)
         {
             const CabInfo &info = win->info;
-            right = formatSize(info.totalSize) + " → " + formatSize(info.fileSize) + " (" +
-                formatRatio(info.fileSize, info.totalSize) + ")  " + info.method + " ";
+            // У самораспаковывающегося архива учитывается только CAB, без распаковщика.
+            uint64_t packed = info.fileSize - info.offset;
+            right = formatSize(info.totalSize) + " → " + formatSize(packed) + " (" +
+                formatRatio(packed, info.totalSize) + ")  " + info.method + " ";
             if (win->readOnly())
                 right = "только чтение  " + right;
         }
@@ -1095,8 +1100,9 @@ void TPanelWindow::viewFile()
         title = file = fsu::joinPath(fsDir, it.name);
 
     // Архив (по сигнатуре, а не по расширению) открывается в панели,
-    // остальное — как текст.
-    if (cabHasSignature(file))
+    // остальное — как текст. Содержимое самораспаковывающегося архива
+    // тоже показывается в панели (Enter такой архив запускает).
+    if (cabHasSignature(file, true))
     {
         if (archiveMode)
             enterNested(file, it.name);
@@ -1250,8 +1256,13 @@ void TPanelWindow::addFiles()
     }
     if (exists && !existing.entries.empty())
         opt.compression = existing.compression;
+    opt.allowSfx = !exists;
+    opt.sfx = !exists && fsu::upper(fsu::extension(archivePath)) == "EXE";
 
     if (!addFilesDialog(exists ? "Добавить в архив" : "Новый архив", opt))
+        return;
+    std::string stub;
+    if (opt.sfx && !prepareSfx(archivePath, stub))
         return;
     std::vector<CabSource> sources;
     if (!collectSources(opt, sources))
@@ -1287,7 +1298,7 @@ void TPanelWindow::addFiles()
     bool ok = runWithProgress(exists ? "Добавление в архив" : "Создание архива",
         [&](CabProgress *p, std::string &err) {
             return exists ? cabUpdate(archivePath, {}, sources, comp, p, err)
-                          : cabCreate(archivePath, sources, comp, p, err);
+                          : cabCreate(archivePath, sources, comp, p, err, stub);
         });
     if (archiveMode)
         refresh();

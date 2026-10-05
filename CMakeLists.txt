@@ -59,9 +59,11 @@ add_executable(cabine
     src/fsutil.cpp
     src/hotkeys.cpp
     src/panel.cpp
+    src/sfxstub.cpp
     src/shellreg.cpp
     src/viewer.cpp
     src/cabine.rc
+    src/sfxstub.rc
 )
 target_compile_features(cabine PRIVATE cxx_std_17)
 target_compile_definitions(cabine PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -69,6 +71,32 @@ target_link_libraries(cabine PRIVATE tvision cabinet shell32 ole32 user32 advapi
 if (MSVC)
     target_compile_options(cabine PRIVATE /W3)
 endif()
+
+# ---------------------------------------------------------------------------
+# Программа-распаковщик самораспаковывающихся архивов. Встраивается
+# в cabine.exe ресурсом; при создании архива к ней дописывается CAB.
+# ---------------------------------------------------------------------------
+add_executable(cabine-sfx
+    src/sfx/sfxmain.cpp
+    src/cabfile.cpp
+    src/dialogs.cpp
+    src/format.cpp
+    src/fsutil.cpp
+    src/hotkeys.cpp
+    src/sfx/sfx.rc
+)
+target_compile_features(cabine-sfx PRIVATE cxx_std_17)
+target_compile_definitions(cabine-sfx PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(cabine-sfx PRIVATE tvision cabinet shell32 ole32 user32 advapi32)
+if (MSVC)
+    target_compile_options(cabine-sfx PRIVATE /W3)
+endif()
+
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/sfxstub/$<CONFIG>/sfxstub_path.h"
+     CONTENT "#define CABINE_SFX_STUB \"$<TARGET_FILE:cabine-sfx>\"
+")
+target_include_directories(cabine PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/sfxstub/$<CONFIG>")
+add_dependencies(cabine cabine-sfx)
 
 # ---------------------------------------------------------------------------
 # Посредник для контекстного меню Проводника: без окна консоли собирает пути

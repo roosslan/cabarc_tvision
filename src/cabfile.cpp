@@ -1,5 +1,6 @@
 // Стандартные заголовки подключаются до fci.h/fdi.h: те определяют
 // пустой макрос HUGE, который ломает объявления в <cmath>.
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -118,6 +119,67 @@ INT_PTR openFile(const char *path, int oflag, int pmode)
     return _wopen(fsu::widen(path).c_str(), oflag | _O_BINARY, pmode);
 }
 
+// Начало архива в файле: 0, если файл начинается с "MSCF", либо конец образа
+// программы (исполняемого файла PE), если сразу за ним записан CAB.
+bool findCabOffset(FILE *f, uint64_t &offset)
+{
+    char sig[4];
+    if (_fseeki64(f, 0, SEEK_SET) != 0 || !readExact(f, sig, 4))
+        return false;
+    if (memcmp(sig, "MSCF", 4) == 0)
+    {
+        offset = 0;
+        return true;
+    }
+    if (memcmp(sig, "MZ", 2) != 0)
+        return false;
+
+    uint8_t lfanew[4], pe[24];
+    if (_fseeki64(f, 0x3C, SEEK_SET) != 0 || !readExact(f, lfanew, 4))
+        return false;
+    uint32_t peOffset = rd32(lfanew);
+    if (_fseeki64(f, peOffset, SEEK_SET) != 0 || !readExact(f, pe, sizeof(pe)) ||
+        memcmp(pe, "PE\0\0", 4) != 0)
+        return false;
+    uint16_t sections = rd16(pe + 6);
+    uint16_t optSize = rd16(pe + 20);
+    if (_fseeki64(f, (int64_t) peOffset + 24 + optSize, SEEK_SET) != 0)
+        return false;
+    uint64_t end = 0;
+    for (uint16_t i = 0; i < sections; ++i)
+    {
+        uint8_t sh[40];
+        if (!readExact(f, sh, sizeof(sh)))
+            return false;
+        uint64_t rawSize = rd32(sh + 16), rawPtr = rd32(sh + 20);
+        if (rawSize && rawPtr + rawSize > end)
+            end = rawPtr + rawSize;
+    }
+    if (end == 0 || _fseeki64(f, (int64_t) end, SEEK_SET) != 0 || !readExact(f, sig, 4) ||
+        memcmp(sig, "MSCF", 4) != 0)
+        return false;
+    offset = end;
+    return true;
+}
+
+// Копирует n байт (или до конца файла при n == UINT64_MAX) из одного файла в другой.
+bool copyBytes(FILE *from, FILE *to, uint64_t n)
+{
+    std::vector<char> buf(1 << 20);
+    while (n > 0)
+    {
+        size_t chunk = (size_t) std::min<uint64_t>(n, buf.size());
+        size_t got = fread(buf.data(), 1, chunk, from);
+        if (got == 0)
+            return n == UINT64_MAX && !ferror(from);
+        if (fwrite(buf.data(), 1, got, to) != got)
+            return false;
+        if (n != UINT64_MAX)
+            n -= got;
+    }
+    return true;
+}
+
 void applyFileInfo(const std::string &path, USHORT date, USHORT time, USHORT attribs)
 {
     std::wstring w = fsu::widen(path);
@@ -143,6 +205,9 @@ const INT_PTR kNullSink = 0x7FFFFFF0;
 
 struct FdiContext
 {
+    std::string cabFile;        // полный путь архива в верхнем регистре
+    uint64_t cabOffset = 0;     // смещение архива в файле
+    std::unordered_set<INT_PTR> shifted;    // дескрипторы, открытые со смещением
     std::string destDir;
     std::unordered_set<std::string> wanted;
     bool all = true;
@@ -167,7 +232,18 @@ FdiContext *g_fdi = nullptr;
 
 FNALLOC(memAlloc) { return malloc(cb); }
 FNFREE(memFree) { free(pv); }
-FNOPEN(fdiOpen) { return openFile(pszFile, oflag, pmode); }
+// У самораспаковывающегося архива позиции в файле CAB отсчитываются
+// от его начала, а не от начала программы-распаковщика.
+FNOPEN(fdiOpen)
+{
+    INT_PTR h = openFile(pszFile, oflag, pmode);
+    if (h != -1 && g_fdi && g_fdi->cabOffset && fsu::upper(pszFile) == g_fdi->cabFile)
+    {
+        _lseeki64((int) h, (int64_t) g_fdi->cabOffset, SEEK_SET);
+        g_fdi->shifted.insert(h);
+    }
+    return h;
+}
 FNREAD(fdiRead) { return (UINT) _read((int) hf, pv, cb); }
 
 FNWRITE(fdiWrite)
@@ -191,10 +267,19 @@ FNCLOSE(fdiClose)
         return 0;
     if (g_fdi && hf == g_fdi->curFd)
         g_fdi->curFd = -1;
+    if (g_fdi)
+        g_fdi->shifted.erase(hf);
     return _close((int) hf);
 }
 
-FNSEEK(fdiSeek) { return _lseek((int) hf, dist, seektype); }
+FNSEEK(fdiSeek)
+{
+    if (!g_fdi || !g_fdi->shifted.count(hf))
+        return _lseek((int) hf, dist, seektype);
+    int64_t base = (int64_t) g_fdi->cabOffset;
+    int64_t r = _lseeki64((int) hf, seektype == SEEK_SET ? base + dist : dist, seektype);
+    return r == -1 ? -1 : (long) (r - base);
+}
 
 INT_PTR FdiContext::copyFile(PFDINOTIFICATION p)
 {
@@ -326,6 +411,7 @@ bool runFdi(const std::string &cabPath, FdiContext &c, std::string &err, CabResu
     std::vector<char> nameBuf(name.begin(), name.end()), dirBuf(dir.begin(), dir.end());
     nameBuf.push_back(0);
     dirBuf.push_back(0);
+    c.cabFile = fsu::upper(dir + name);
 
     g_fdi = &c;
     BOOL ok = FDICopy(hfdi, nameBuf.data(), dirBuf.data(), 0, fdiNotify, nullptr, &c);
@@ -534,7 +620,8 @@ bool cabRead(const std::string &path, CabInfo &info, std::string &err)
 
     const char *const corrupt = "Архив повреждён: неверная структура заголовка";
     uint8_t h[36];
-    if (!readExact(f, h, sizeof(h)) || memcmp(h, "MSCF", 4) != 0)
+    if (!findCabOffset(f, info.offset) || _fseeki64(f, (int64_t) info.offset, SEEK_SET) != 0 ||
+        !readExact(f, h, sizeof(h)) || memcmp(h, "MSCF", 4) != 0)
     {
         err = "Файл не является CAB-архивом";
         return false;
@@ -591,7 +678,7 @@ bool cabRead(const std::string &path, CabInfo &info, std::string &err)
         types.push_back(rd16(fo + 6));
     }
 
-    if (fseek(f, (long) coffFiles, SEEK_SET) != 0)
+    if (_fseeki64(f, (int64_t) (info.offset + coffFiles), SEEK_SET) != 0)
     {
         err = corrupt;
         return false;
@@ -637,13 +724,13 @@ bool cabRead(const std::string &path, CabInfo &info, std::string &err)
     return true;
 }
 
-bool cabHasSignature(const std::string &path)
+bool cabHasSignature(const std::string &path, bool sfx)
 {
     FILE *f = _wfopen(fsu::widen(path).c_str(), L"rb");
     if (!f)
         return false;
-    char sig[4] = {0};
-    bool ok = fread(sig, 1, 4, f) == 4 && memcmp(sig, "MSCF", 4) == 0;
+    uint64_t offset = 0;
+    bool ok = findCabOffset(f, offset) && (sfx || offset == 0);
     fclose(f);
     return ok;
 }
@@ -667,6 +754,7 @@ bool cabExtract(const std::string &cabPath, const std::string &destDir,
     if (!cabRead(cabPath, info, err))
         return false;
     FdiContext c;
+    c.cabOffset = info.offset;
     c.destDir = destDir;
     c.all = names.empty();
     c.wanted.insert(names.begin(), names.end());
@@ -692,6 +780,7 @@ bool cabTest(const std::string &cabPath, CabProgress *progress, std::string &err
     if (!cabRead(cabPath, info, err))
         return false;
     FdiContext c;
+    c.cabOffset = info.offset;
     c.test = true;
     c.progress = progress;
     c.total = info.totalSize;
@@ -699,7 +788,8 @@ bool cabTest(const std::string &cabPath, CabProgress *progress, std::string &err
 }
 
 bool cabCreate(const std::string &cabPath, const std::vector<CabSource> &filesIn,
-               CompressionSpec comp, CabProgress *progress, std::string &err)
+               CompressionSpec comp, CabProgress *progress, std::string &err,
+               const std::string &prefix)
 {
     // Одинаковые имена в архиве не допускаются: последний источник заменяет предыдущий.
     std::vector<CabSource> files;
@@ -810,6 +900,27 @@ bool cabCreate(const std::string &cabPath, const std::vector<CabSource> &filesIn
         fsu::removeFile(tmpPath);
         return false;
     }
+    if (!prefix.empty())
+    {
+        // Самораспаковывающийся архив: программа-распаковщик, за ней CAB.
+        std::string sfxPath = cabPath + ".sfx~";
+        FILE *in = _wfopen(fsu::widen(tmpPath).c_str(), L"rb");
+        FILE *out = _wfopen(fsu::widen(sfxPath).c_str(), L"wb");
+        bool written = in && out && fwrite(prefix.data(), 1, prefix.size(), out) == prefix.size() &&
+                       copyBytes(in, out, UINT64_MAX);
+        if (out && fclose(out) != 0)
+            written = false;
+        if (in)
+            fclose(in);
+        fsu::removeFile(tmpPath);
+        if (!written)
+        {
+            err = "Не удалось записать архив " + cabPath + "\n" + fsu::lastErrorText();
+            fsu::removeFile(sfxPath);
+            return false;
+        }
+        tmpPath = sfxPath;
+    }
     if (!fsu::moveReplace(tmpPath, cabPath))
     {
         err = "Не удалось записать архив " + cabPath + "\n" + fsu::lastErrorText();
@@ -866,7 +977,25 @@ bool cabUpdate(const std::string &cabPath, const std::vector<std::string> &remov
     }
     sources.insert(sources.end(), add.begin(), add.end());
 
-    bool ok = cabCreate(cabPath, sources, comp, progress, err);
+    // Программа-распаковщик самораспаковывающегося архива переносится как есть.
+    std::string prefix;
+    if (info.offset)
+    {
+        FILE *f = _wfopen(fsu::widen(cabPath).c_str(), L"rb");
+        prefix.resize((size_t) info.offset);
+        bool read = f && readExact(f, &prefix[0], prefix.size());
+        if (f)
+            fclose(f);
+        if (!read)
+        {
+            err = "Не удалось прочитать файл " + cabPath + "\n" + fsu::lastErrorText();
+            if (!tmp.empty())
+                fsu::removeTree(tmp);
+            return false;
+        }
+    }
+
+    bool ok = cabCreate(cabPath, sources, comp, progress, err, prefix);
     if (!tmp.empty())
         fsu::removeTree(tmp);
     return ok;

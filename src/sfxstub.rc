@@ -1,0 +1,6 @@
+// Программа-распаковщик встраивается в cabine.exe. Путь к собранному
+// cabine-sfx.exe задаёт файл sfxstub_path.h, создаваемый CMake.
+#include "sfx/sfxres.h"
+#include "sfxstub_path.h"
+
+IDR_SFX_STUB RCDATA CABINE_SFX_STUB
