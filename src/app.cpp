@@ -25,6 +25,7 @@
 #include "format.h"
 #include "hotkeys.h"
 #include "panel.h"
+#include "sfxstub.h"
 #include "shellreg.h"
 #include "version.h"
 
@@ -229,14 +230,19 @@ void TCabineApp::newArchive()
 
     AddOptions opt;
     opt.compression = defaultCompression;
+    opt.allowSfx = true;
+    opt.sfx = fsu::upper(fsu::extension(path)) == "EXE";
     if (!addFilesDialog("Новый архив", opt))
+        return;
+    std::string stub;
+    if (opt.sfx && !prepareSfx(path, stub))
         return;
     std::vector<CabSource> sources;
     if (!collectSources(opt, sources))
         return;
     CompressionSpec comp = opt.compression;
     if (runWithProgress("Создание архива", [&](CabProgress *p, std::string &err) {
-            return cabCreate(path, sources, comp, p, err);
+            return cabCreate(path, sources, comp, p, err, stub);
         }))
         openPath(path);
 }

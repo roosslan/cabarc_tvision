@@ -769,11 +769,12 @@ private:
     TCheckBoxes *flagsBox;
     TRadioButtons *method;
     TInputLine *prefix;
+    TCheckBoxes *sfx = nullptr;
 };
 
 TAddDialog::TAddDialog(const char *title, AddOptions &opt) :
     TWindowInit(&TDialog::initFrame),
-    TDialog(TRect(0, 0, 70, 21), title),
+    TDialog(TRect(0, 0, 70, opt.allowSfx ? 23 : 21), title),
     opt(opt),
     items(opt.items)
 {
@@ -810,8 +811,19 @@ TAddDialog::TAddDialog(const char *title, AddOptions &opt) :
     insert(new TLabel(TRect(2, 15, 30, 16), "Путь внутри ~а~рхива:", prefix));
     setInputText(prefix, opt.prefix);
 
-    insert(new TButton(TRect(22, 18, 34, 20), "O~K~", cmOK, bfDefault));
-    insert(new TButton(TRect(36, 18, 48, 20), "Отмена", cmCancel, bfNormal));
+    // Выбор доступен только при создании нового архива.
+    int y = 18;
+    if (opt.allowSfx)
+    {
+        sfx = new TCheckBoxes(TRect(3, 18, 67, 19),
+            new TSItem("Создать самораспаковывающийся архив (EXE)", nullptr));
+        insert(sfx);
+        setClusterValue(sfx, opt.sfx ? 1 : 0);
+        y = 20;
+    }
+
+    insert(new TButton(TRect(22, y, 34, y + 2), "O~K~", cmOK, bfDefault));
+    insert(new TButton(TRect(36, y, 48, y + 2), "Отмена", cmCancel, bfNormal));
 
     selectNext(False);
 }
@@ -886,6 +898,7 @@ Boolean TAddDialog::valid(ushort command)
         opt.keepPaths = (f & 2) != 0;
         opt.prefix = prefix->data;
         opt.compression.type = (CabCompression) clusterValue(method);
+        opt.sfx = sfx && (clusterValue(sfx) & 1) != 0;
     }
     return TDialog::valid(command);
 }
@@ -897,7 +910,9 @@ Boolean TAddDialog::valid(ushort command)
 class TExtractDialog : public TDialog
 {
 public:
-    TExtractDialog(int selectedCount, int totalCount, ExtractOptions &opt);
+    // about — сведения об архиве над полем директории (окно распаковщика).
+    TExtractDialog(int selectedCount, int totalCount, ExtractOptions &opt,
+                   const std::string *about = nullptr);
 
     void handleEvent(TEvent &ev) override;
     Boolean valid(ushort command) override;
@@ -910,18 +925,27 @@ private:
     TCheckBoxes *paths;
 };
 
-TExtractDialog::TExtractDialog(int selectedCount, int totalCount, ExtractOptions &opt) :
+TExtractDialog::TExtractDialog(int selectedCount, int totalCount, ExtractOptions &opt,
+                               const std::string *about) :
     TWindowInit(&TDialog::initFrame),
-    TDialog(TRect(0, 0, 66, 16), "Извлечь файлы"),
+    TDialog(TRect(0, 0, 66, about ? 16 + TMultiText::rowsFor(*about, 60) + 1 : 16),
+            about ? "Самораспаковывающийся архив" : "Извлечь файлы"),
     opt(opt)
 {
     options |= ofCentered;
 
-    dest = new TInputLine(TRect(3, 3, 50, 4), 250);
+    int dy = 0;
+    if (about)
+    {
+        dy = TMultiText::rowsFor(*about, 60) + 1;
+        insert(new TMultiText(TRect(3, 2, 63, 2 + dy - 1), *about));
+    }
+
+    dest = new TInputLine(TRect(3, 3 + dy, 50, 4 + dy), 250);
     insert(dest);
-    insert(new THistory(TRect(50, 3, 53, 4), dest, hlExtract));
-    insert(new TLabel(TRect(2, 2, 20, 3), "Извлечь ~в~:", dest));
-    insert(new TButton(TRect(54, 2, 65, 4), "~О~бзор...", cmBrowseDir, bfNormal));
+    insert(new THistory(TRect(50, 3 + dy, 53, 4 + dy), dest, hlExtract));
+    insert(new TLabel(TRect(2, 2 + dy, 30, 3 + dy), about ? "~Р~аспаковать в:" : "Извлечь ~в~:", dest));
+    insert(new TButton(TRect(54, 2 + dy, 65, 4 + dy), "~О~бзор...", cmBrowseDir, bfNormal));
     setInputText(dest, opt.dest);
 
     // Выбор «выбранные / все» нужен только при извлечении из открытого архива.
@@ -938,22 +962,30 @@ TExtractDialog::TExtractDialog(int selectedCount, int totalCount, ExtractOptions
             scope->setButtonState(1, False);
     }
 
-    overwrite = new TRadioButtons(TRect(34, 6, 63, 9),
+    overwrite = new TRadioButtons(TRect(34, 6 + dy, 63, 9 + dy),
         new TSItem("Спрашивать",
         new TSItem("Заменять",
         new TSItem("Пропускать", nullptr))));
     insert(overwrite);
-    insert(new TLabel(TRect(33, 5, 58, 6), "~С~уществующие файлы:", overwrite));
+    insert(new TLabel(TRect(33, 5 + dy, 58, 6 + dy), "~С~уществующие файлы:", overwrite));
     setClusterValue(overwrite, (ushort) opt.overwrite);
 
-    paths = new TCheckBoxes(TRect(3, 10, 32, 11),
+    paths = new TCheckBoxes(TRect(3, 10 + dy, 32, 11 + dy),
         new TSItem("Сохранять пути", nullptr));
     insert(paths);
-    insert(new TLabel(TRect(2, 9, 20, 10), "~П~араметры:", paths));
+    insert(new TLabel(TRect(2, 9 + dy, 20, 10 + dy), "~П~араметры:", paths));
     setClusterValue(paths, opt.keepPaths ? 1 : 0);
 
-    insert(new TButton(TRect(20, 13, 32, 15), "O~K~", cmOK, bfDefault));
-    insert(new TButton(TRect(34, 13, 46, 15), "Отмена", cmCancel, bfNormal));
+    if (about)
+    {
+        insert(new TButton(TRect(17, 13 + dy, 33, 15 + dy), "Р~а~спаковать", cmOK, bfDefault));
+        insert(new TButton(TRect(35, 13 + dy, 47, 15 + dy), "Отмена", cmCancel, bfNormal));
+    }
+    else
+    {
+        insert(new TButton(TRect(20, 13, 32, 15), "O~K~", cmOK, bfDefault));
+        insert(new TButton(TRect(34, 13, 46, 15), "Отмена", cmCancel, bfNormal));
+    }
 
     selectNext(False);
 }
@@ -1006,6 +1038,14 @@ bool addFilesDialog(const char *title, AddOptions &opt)
 bool extractDialog(int selectedCount, int totalCount, ExtractOptions &opt)
 {
     TExtractDialog *d = new TExtractDialog(selectedCount, totalCount, opt);
+    ushort r = TProgram::deskTop->execView(d);
+    TObject::destroy(d);
+    return r == cmOK;
+}
+
+bool sfxDialog(const std::string &about, ExtractOptions &opt)
+{
+    TExtractDialog *d = new TExtractDialog(0, 0, opt, &about);
     ushort r = TProgram::deskTop->execView(d);
     TObject::destroy(d);
     return r == cmOK;

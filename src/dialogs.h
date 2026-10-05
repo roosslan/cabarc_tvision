@@ -56,6 +56,8 @@ struct AddOptions
     bool keepPaths = true;
     std::string prefix;
     CompressionSpec compression;
+    bool allowSfx = false;  // показывать выбор самораспаковывающегося архива
+    bool sfx = false;
 };
 
 struct ExtractOptions
@@ -69,6 +71,8 @@ struct ExtractOptions
 bool addFilesDialog(const char *title, AddOptions &opt);
 // totalCount == 0: извлечение архивов целиком, без выбора «выбранные / все».
 bool extractDialog(int selectedCount, int totalCount, ExtractOptions &opt);
+// Окно самораспаковывающегося архива: сведения об архиве и куда распаковывать.
+bool sfxDialog(const std::string &about, ExtractOptions &opt);
 struct Settings
 {
     bool associate = false;         // файлы .cab открываются в Cabine

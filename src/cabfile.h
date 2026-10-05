@@ -29,6 +29,9 @@ struct CabEntry
 struct CabInfo
 {
     std::string path;
+    // Смещение архива в файле. У самораспаковывающегося архива CAB
+    // записан после программы-распаковщика, иначе смещение нулевое.
+    uint64_t offset = 0;
     uint64_t fileSize = 0;      // размер файла архива
     uint64_t totalSize = 0;     // суммарный размер файлов
     uint16_t folders = 0;
@@ -73,7 +76,8 @@ extern const char *const kCabCancelled;
 bool cabRead(const std::string &path, CabInfo &info, std::string &err);
 
 // Файл начинается с сигнатуры CAB-архива "MSCF" (независимо от расширения).
-bool cabHasSignature(const std::string &path);
+// sfx: подходит и самораспаковывающийся архив (CAB после программы).
+bool cabHasSignature(const std::string &path, bool sfx = false);
 
 // Путь, по которому файл архива будет извлечён в destDir. С сохранением путей
 // путь строится относительно директории base внутри архива.
@@ -90,10 +94,14 @@ bool cabExtract(const std::string &cabPath, const std::string &destDir,
 bool cabTest(const std::string &cabPath, CabProgress *progress, std::string &err,
              CabResult *result = nullptr);
 
+// prefix — данные, записываемые перед архивом (программа-распаковщик
+// самораспаковывающегося архива).
 bool cabCreate(const std::string &cabPath, const std::vector<CabSource> &files,
-               CompressionSpec comp, CabProgress *progress, std::string &err);
+               CompressionSpec comp, CabProgress *progress, std::string &err,
+               const std::string &prefix = std::string());
 
 // Пересборка архива: удаление файлов remove и добавление (замена) файлов add.
+// Программа-распаковщик самораспаковывающегося архива сохраняется.
 bool cabUpdate(const std::string &cabPath, const std::vector<std::string> &remove,
                const std::vector<CabSource> &add, CompressionSpec comp,
                CabProgress *progress, std::string &err);
