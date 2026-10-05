@@ -10,6 +10,7 @@
 
 #include "cabfile.h"
 
+class TButton;
 class TTextLine;
 class TProgressBar;
 
@@ -31,7 +32,9 @@ public:
 
 private:
     bool refresh(bool force);
+    bool confirmCancel();
 
+    TButton *cancelButton;
     TTextLine *stage;
     TTextLine *file;
     TProgressBar *bar;
@@ -66,7 +69,14 @@ struct ExtractOptions
 bool addFilesDialog(const char *title, AddOptions &opt);
 // totalCount == 0: извлечение архивов целиком, без выбора «выбранные / все».
 bool extractDialog(int selectedCount, int totalCount, ExtractOptions &opt);
-bool optionsDialog(CompressionSpec &spec);
+struct Settings
+{
+    bool associate = false;         // файлы .cab открываются в Cabine
+    bool archivesFirst = false;     // архивы в панели выше остальных файлов
+    CompressionSpec compression;    // метод сжатия новых архивов
+};
+
+bool settingsDialog(Settings &s);
 void textDialog(const char *title, const std::string &text);
 
 bool chooseFile(const char *title, const char *wildcard, bool forSave, std::string &path);

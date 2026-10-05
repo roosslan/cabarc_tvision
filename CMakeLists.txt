@@ -9,15 +9,16 @@ endif()
 # Статическая RTL: исполняемый файл не зависит от VC++ Redistributable.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-set(TV_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../tv" CACHE PATH "Путь к исходникам Turbo Vision")
+# Turbo Vision подключён git-субмодулем tvision (magiblot/tvision).
+set(TV_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/tvision" CACHE PATH "Путь к исходникам Turbo Vision")
 if (NOT EXISTS "${TV_ROOT}/include/tvision/tv.h")
-    message(FATAL_ERROR "Не найден Turbo Vision в ${TV_ROOT}. Необходимо указать -DTV_ROOT=<путь>.")
+    message(FATAL_ERROR "Не найден Turbo Vision в ${TV_ROOT}. Необходимо выполнить "
+                        "git submodule update --init либо указать -DTV_ROOT=<путь>.")
 endif()
 
 # ---------------------------------------------------------------------------
-# Turbo Vision собирается прямо из исходников: корневой CMakeLists.txt
-# библиотеки ссылается на отсутствующую директорию examples.
-# Файл строк интерфейса tvtext2.cpp заменён русифицированной копией.
+# Turbo Vision собирается прямо из исходников, без его CMakeLists.txt:
+# файл строк интерфейса tvtext2.cpp заменён русифицированной копией.
 # ---------------------------------------------------------------------------
 file(GLOB_RECURSE TV_SOURCES "${TV_ROOT}/source/*/*.cpp")
 list(REMOVE_ITEM TV_SOURCES

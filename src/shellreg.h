@@ -8,3 +8,11 @@
 //   файлы .cab — «Распаковать здесь» и «Открыть в Cabine».
 bool registerShellMenu(const std::string &cabineExe, const std::string &shellExe, std::string &err);
 bool unregisterShellMenu(std::string &err);
+
+// Ассоциация файлов .cab с Cabine (двойной щелчок открывает архив в панели).
+// Записывается в HKCU\Software\Classes; прежнее значение восстанавливается при отключении.
+bool isCabAssociated();
+bool setCabAssociation(bool enable, const std::string &cabineExe, std::string &err);
+// Выбор программы для .cab через «Открыть с помощью» (UserChoice) имеет приоритет
+// над ассоциацией и программно не меняется.
+bool cabUserChoiceOverrides();

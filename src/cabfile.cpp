@@ -504,7 +504,7 @@ std::string fciErrorText(const ERF &erf)
         case FCIERR_CAB_FILE:           return "Ошибка записи файла архива";
         case FCIERR_USER_ABORT:         return kCabCancelled;
         case FCIERR_MCI_FAIL:           return "Ошибка сжатия данных";
-        case FCIERR_CAB_FORMAT_LIMIT:   return "Превышено ограничение формата CAB (размер архива до 2 ГБ)";
+        case FCIERR_CAB_FORMAT_LIMIT:   return "Превышено ограничение формата CAB (размер архива до 2 Гб)";
         default:                        return "Ошибка создания архива (код " + std::to_string(erf.erfOper) + ")";
     }
 }
@@ -637,6 +637,17 @@ bool cabRead(const std::string &path, CabInfo &info, std::string &err)
     return true;
 }
 
+bool cabHasSignature(const std::string &path)
+{
+    FILE *f = _wfopen(fsu::widen(path).c_str(), L"rb");
+    if (!f)
+        return false;
+    char sig[4] = {0};
+    bool ok = fread(sig, 1, 4, f) == 4 && memcmp(sig, "MSCF", 4) == 0;
+    fclose(f);
+    return ok;
+}
+
 std::string cabTargetPath(const std::string &destDir, const std::string &name, bool keepPaths,
                           const std::string &base)
 {
@@ -728,7 +739,7 @@ bool cabCreate(const std::string &cabPath, const std::vector<CabSource> &filesIn
         uint64_t size = fsu::fileSize(s.diskPath);
         if (size >= 0x7FFF8000ull)
         {
-            err = "Файл слишком велик для формата CAB (не более 2 ГБ):\n" + s.diskPath;
+            err = "Файл слишком велик для формата CAB (не более 2 Гб):\n" + s.diskPath;
             return false;
         }
         c.total += size;

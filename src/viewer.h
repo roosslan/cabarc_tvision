@@ -16,9 +16,11 @@ public:
     TViewerWindow(const TRect &bounds, const std::string &title, std::string &&data);
 
     void handleEvent(TEvent &event) override;
+    void changeBounds(const TRect &bounds) override;
 
 private:
     void applyEncoding();
+    void updateTitle();
 
     std::string title_;
     std::string data;

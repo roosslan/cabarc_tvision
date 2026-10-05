@@ -32,10 +32,10 @@ std::string formatSize(uint64_t n)
     if (n < 1024)
         return std::to_string(n) + " Б";
     if (n < 1024 * 1024)
-        return decimal(n / 1024.0, "КБ");
+        return decimal(n / 1024.0, "Кб");
     if (n < 1024ull * 1024 * 1024)
-        return decimal(n / (1024.0 * 1024), "МБ");
-    return decimal(n / (1024.0 * 1024 * 1024), "ГБ");
+        return decimal(n / (1024.0 * 1024), "Мб");
+    return decimal(n / (1024.0 * 1024 * 1024), "Гб");
 }
 
 std::string formatDateTime(uint16_t date, uint16_t time)

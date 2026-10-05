@@ -124,10 +124,36 @@ TViewerWindow::TViewerWindow(const TRect &bounds, const std::string &title, std:
 void TViewerWindow::applyEncoding()
 {
     viewer->setText(encoding == 0 ? data : fsu::fromCodePage(data, kCodePages[encoding]));
+    updateTitle();
+}
+
+// Длинный путь укорачивается слева, имя файла и подсказка остаются видны.
+void TViewerWindow::updateTitle()
+{
+    std::string hint = std::string(" [") + kEncodingNames[encoding] + " — F8, закрыть — Esc]";
+    std::string path = title_;
+    int maxW = std::max(10, size.x - 14 - strwidth(hint));
+    if (strwidth(path) > maxW)
+    {
+        while (!path.empty() && strwidth(path) > maxW - 1)
+        {
+            size_t n = 1;
+            while (n < path.size() && ((unsigned char) path[n] & 0xC0) == 0x80)
+                ++n;
+            path.erase(0, n);
+        }
+        path = "…" + path;
+    }
     delete[] (char *) title;
-    title = newStr(title_ + " [" + kEncodingNames[encoding] + " — F8, закрыть — Esc]");
+    title = newStr(path + hint);
     if (frame)
         frame->drawView();
+}
+
+void TViewerWindow::changeBounds(const TRect &bounds)
+{
+    TWindow::changeBounds(bounds);
+    updateTitle();
 }
 
 void TViewerWindow::handleEvent(TEvent &event)
