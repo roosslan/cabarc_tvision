@@ -55,7 +55,8 @@ private:
     bool started = false;
     bool panelCommands = true;
     BatchMode batch = BatchMode::None;
-    std::vector<std::string> pending;
+    std::vector<std::string> pending;       // пути для открытия в панели
+    std::vector<std::string> batchPaths;    // пути пакетного режима (-a, -x)
     std::string tempRoot;
     unsigned tempCounter = 0;
 };

@@ -82,6 +82,8 @@ bool shellOpen(const std::string &path, std::string &err);
 std::vector<std::string> commandLineArgs();
 std::string exePath();
 void printConsole(const std::string &text);   // вывод UTF-8 в консоль
+// Заголовок окна консоли и значок программы (ресурс 1) вместо значка conhost.
+void setConsoleTitleAndIcon(const std::string &title);
 // Удаление файлов и директорий (с содержимым) в корзину.
 bool recycle(const std::vector<std::string> &paths, std::string &err);
 

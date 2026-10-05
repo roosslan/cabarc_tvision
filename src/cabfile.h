@@ -72,6 +72,9 @@ extern const char *const kCabCancelled;
 
 bool cabRead(const std::string &path, CabInfo &info, std::string &err);
 
+// Файл начинается с сигнатуры CAB-архива "MSCF" (независимо от расширения).
+bool cabHasSignature(const std::string &path);
+
 // Путь, по которому файл архива будет извлечён в destDir. С сохранением путей
 // путь строится относительно директории base внутри архива.
 std::string cabTargetPath(const std::string &destDir, const std::string &name, bool keepPaths,

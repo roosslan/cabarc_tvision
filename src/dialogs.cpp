@@ -1,5 +1,6 @@
 #define Uses_TKeys
 #define Uses_TEvent
+#define Uses_TEventQueue
 #define Uses_TRect
 #define Uses_TView
 #define Uses_TGroup
@@ -577,7 +578,7 @@ public:
 
 TProgressDialog::TProgressDialog(const char *title) :
     TWindowInit(&TDialog::initFrame),
-    TDialog(TRect(0, 0, 64, 9), title)
+    TDialog(TRect(0, 0, 64, 10), title)
 {
     options |= ofCentered;
     flags &= ~wfClose;
@@ -587,7 +588,17 @@ TProgressDialog::TProgressDialog(const char *title) :
     insert(stage);
     insert(file);
     insert(bar);
-    insert(new TStaticText(TRect(2, 7, 62, 8), "\003Esc — прервать"));
+    cancelButton = new TButton(TRect(26, 7, 38, 9), "Отмена", cmCancel, bfDefault);
+    insert(cancelButton);
+}
+
+bool TProgressDialog::confirmCancel()
+{
+    if (messageBox("Прервать операцию?", mfConfirmation | mfYesButton | mfNoButton) == cmYes)
+        cancelled_ = true;
+    TScreen::flushScreen();
+    lastRefresh = std::chrono::steady_clock::now();
+    return cancelled_;
 }
 
 void TProgressDialog::onStage(const std::string &text)
@@ -642,10 +653,20 @@ bool TProgressDialog::refresh(bool force)
     lastRefresh = now;
     TScreen::flushScreen();
 
+    // Цикл событий во время операции не работает: мышь и клавиатура
+    // опрашиваются здесь. Отмена — щелчок по кнопке, Esc, Enter или пробел.
     for (int i = 0; i < 32 && !cancelled_; ++i)
     {
         TEvent ev;
         ev.what = evNothing;
+        ev.getMouseEvent();
+        if (ev.what == evMouseDown && cancelButton->mouseInView(ev.mouse.where))
+        {
+            confirmCancel();
+            break;
+        }
+        if (ev.what != evNothing)
+            continue;
         ev.getKeyEvent(False);
         if (ev.what == evNothing)
             break;
@@ -655,13 +676,10 @@ bool TProgressDialog::refresh(bool force)
             TProgram::application->putEvent(ev);
             break;
         }
-        if (ev.keyDown.keyCode == kbEsc)
+        ushort key = ev.keyDown.keyCode;
+        if (key == kbEsc || key == kbEnter || ev.keyDown.charScan.charCode == ' ')
         {
-            if (messageBox("Прервать операцию?",
-                           mfConfirmation | mfYesButton | mfNoButton) == cmYes)
-                cancelled_ = true;
-            TScreen::flushScreen();
-            lastRefresh = std::chrono::steady_clock::now();
+            confirmCancel();
             break;
         }
     }
@@ -993,23 +1011,36 @@ bool extractDialog(int selectedCount, int totalCount, ExtractOptions &opt)
     return r == cmOK;
 }
 
-bool optionsDialog(CompressionSpec &spec)
+bool settingsDialog(Settings &s)
 {
-    TDialog *d = new TDialog(TRect(0, 0, 44, 11), "Параметры");
+    TDialog *d = new TDialog(TRect(0, 0, 52, 15), "Параметры");
     d->options |= ofCentered;
-    TRadioButtons *method = new TRadioButtons(TRect(3, 3, 41, 6),
+    TCheckBoxes *general = new TCheckBoxes(TRect(3, 3, 49, 5),
+        new TSItem("Ассоциировать файлы CAB с Cabine",
+        new TSItem("Показывать архивы первыми", nullptr)));
+    d->insert(general);
+    d->insert(new TLabel(TRect(2, 2, 30, 3), "~О~бщие:", general));
+    setClusterValue(general, (s.associate ? 1 : 0) | (s.archivesFirst ? 2 : 0));
+
+    TRadioButtons *method = new TRadioButtons(TRect(3, 7, 49, 10),
         new TSItem("Без сжатия",
         new TSItem("MSZIP (быстрое)",
         new TSItem("LZX (максимальное)", nullptr))));
     d->insert(method);
-    d->insert(new TLabel(TRect(2, 2, 40, 3), "~С~жатие новых архивов:", method));
-    setClusterValue(method, (ushort) spec.type);
-    d->insert(new TButton(TRect(9, 8, 21, 10), "O~K~", cmOK, bfDefault));
-    d->insert(new TButton(TRect(23, 8, 35, 10), "Отмена", cmCancel, bfNormal));
+    d->insert(new TLabel(TRect(2, 6, 40, 7), "~С~жатие новых архивов:", method));
+    setClusterValue(method, (ushort) s.compression.type);
+
+    d->insert(new TButton(TRect(13, 12, 25, 14), "O~K~", cmOK, bfDefault));
+    d->insert(new TButton(TRect(27, 12, 39, 14), "Отмена", cmCancel, bfNormal));
     d->selectNext(False);
     ushort r = TProgram::deskTop->execView(d);
     if (r == cmOK)
-        spec.type = (CabCompression) clusterValue(method);
+    {
+        ushort g = clusterValue(general);
+        s.associate = (g & 1) != 0;
+        s.archivesFirst = (g & 2) != 0;
+        s.compression.type = (CabCompression) clusterValue(method);
+    }
     TObject::destroy(d);
     return r == cmOK;
 }

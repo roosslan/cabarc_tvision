@@ -99,6 +99,7 @@ int main()
                 expandList(a, paths);
     }
 
+    fsu::setConsoleTitleAndIcon("Cabine " CABINE_VERSION);
     TCabineApp *app = new TCabineApp;
     if (batch != BatchMode::None)
         app->setBatch(batch, paths);

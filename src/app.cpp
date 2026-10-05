@@ -25,6 +25,7 @@
 #include "format.h"
 #include "hotkeys.h"
 #include "panel.h"
+#include "shellreg.h"
 #include "version.h"
 
 namespace {
@@ -93,8 +94,8 @@ TMenuBar *TCabineApp::initMenuBar(TRect r)
             *new TMenuItem("По ~д~ате", cmSortDate, kbCtrlF5, hcNoContext, "Ctrl-F5") +
             *new TMenuItem("По ~р~азмеру", cmSortSize, kbCtrlF6, hcNoContext, "Ctrl-F6") +
             *new TMenuItem("~Б~ез сортировки", cmSortNone, kbCtrlF7, hcNoContext, "Ctrl-F7") +
-        *new TSubMenu("~П~араметры", kbNoKey) +
-            *new TMenuItem("~С~жатие...", cmOptions, kbNoKey) +
+        *new TSubMenu("~Н~астройки", kbNoKey) +
+            *new TMenuItem("~П~араметры...", cmOptions, kbNoKey) +
             *new TMenuItem("~О~ программе...", cmAbout, kbNoKey));
 }
 
@@ -159,6 +160,7 @@ void TCabineApp::start()
     }
     // Панель на весь рабочий стол, растягивается вместе с окном консоли.
     panel = new TPanelWindow(deskTop->getExtent());
+    panel->archivesFirst = fsu::loadSetting("ArchivesFirst", "0") == "1";
     deskTop->insert(panel);
     if (!pending.empty())
         return;
@@ -194,6 +196,8 @@ void TCabineApp::openLater(const std::string &path)
 
 void TCabineApp::openPath(const std::string &pathIn)
 {
+    if (!panel)
+        return;
     std::string path = fsu::fullPath(pathIn);
     bool ok = false;
     if (fsu::dirExists(path))
@@ -246,8 +250,33 @@ void TCabineApp::openArchiveDialog()
 
 void TCabineApp::options()
 {
-    if (optionsDialog(defaultCompression))
-        fsu::saveSetting("Compression", compressionName(defaultCompression));
+    Settings s;
+    s.associate = isCabAssociated();
+    s.archivesFirst = panel ? panel->archivesFirst : fsu::loadSetting("ArchivesFirst", "0") == "1";
+    s.compression = defaultCompression;
+    bool wasAssociated = s.associate;
+    if (!settingsDialog(s))
+        return;
+
+    defaultCompression = s.compression;
+    fsu::saveSetting("Compression", compressionName(defaultCompression));
+    fsu::saveSetting("ArchivesFirst", s.archivesFirst ? "1" : "0");
+    if (panel && panel->archivesFirst != s.archivesFirst)
+    {
+        panel->archivesFirst = s.archivesFirst;
+        panel->refresh();
+    }
+
+    if (s.associate != wasAssociated)
+    {
+        std::string err;
+        if (!setCabAssociation(s.associate, fsu::exePath(), err))
+            showError(err);
+        else if (s.associate && cabUserChoiceOverrides())
+            showInfo("Ассоциация записана, но для файлов .cab в Windows выбрана другая программа "
+                     "(«Открыть с помощью» → «Всегда использовать»).\n"
+                     "Чтобы двойной щелчок открывал Cabine, необходимо выбрать её там.");
+    }
 }
 
 void TCabineApp::about()
@@ -262,7 +291,7 @@ void TCabineApp::about()
 void TCabineApp::setBatch(BatchMode mode, const std::vector<std::string> &paths)
 {
     batch = mode;
-    pending = paths;
+    batchPaths = paths;
 }
 
 void TCabineApp::runBatch()
@@ -277,7 +306,7 @@ void TCabineApp::runBatch()
         batchAdd();
     else
         batchExtract();
-    pending.clear();
+    batchPaths.clear();
     TEvent e;
     e.what = evCommand;
     e.message.command = cmQuit;
@@ -292,7 +321,7 @@ void TCabineApp::batchAdd()
 {
     std::vector<std::string> items;
     std::string missing;
-    for (const std::string &p : pending)
+    for (const std::string &p : batchPaths)
     {
         std::string full = fsu::fullPath(p);
         while (full.size() > 3 && (full.back() == '\\' || full.back() == '/'))
@@ -361,7 +390,7 @@ void TCabineApp::batchExtract()
 {
     std::vector<std::string> cabs;
     std::string missing;
-    for (const std::string &p : pending)
+    for (const std::string &p : batchPaths)
     {
         std::string full = fsu::fullPath(p);
         if (fsu::fileExists(full))

@@ -577,6 +577,23 @@ void printConsole(const std::string &text)
         WriteFile(out, text.data(), (DWORD) text.size(), &n, nullptr);
 }
 
+void setConsoleTitleAndIcon(const std::string &title)
+{
+    SetConsoleTitleW(widen(title).c_str());
+    HWND wnd = GetConsoleWindow();
+    if (!wnd)
+        return;
+    HINSTANCE self = GetModuleHandleW(nullptr);
+    HICON iconBig = (HICON) LoadImageW(self, MAKEINTRESOURCEW(1), IMAGE_ICON,
+                                   GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), 0);
+    HICON iconSmall = (HICON) LoadImageW(self, MAKEINTRESOURCEW(1), IMAGE_ICON,
+                                     GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
+    if (iconBig)
+        SendMessageW(wnd, WM_SETICON, ICON_BIG, (LPARAM) iconBig);
+    if (iconSmall)
+        SendMessageW(wnd, WM_SETICON, ICON_SMALL, (LPARAM) iconSmall);
+}
+
 bool recycle(const std::vector<std::string> &paths, std::string &err)
 {
     if (paths.empty())

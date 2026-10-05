@@ -36,6 +36,7 @@ struct PanelItem
     uint16_t time = 0;
     uint16_t attribs = 0;
     int entry = -1;             // индекс записи архива для файла в архиве
+    bool cab = false;           // файл — CAB-архив
     std::wstring wName, wExt;   // ключи сортировки
 };
 
@@ -70,6 +71,7 @@ public:
     std::vector<char> marked;       // пометки по индексам items
     SortKey sortKey = SortKey::Name;
     bool descending = false;
+    bool archivesFirst = false;     // CAB-архивы выше остальных файлов
     bool archiveMode = false;
     CabInfo info;                   // открытый архив
     std::string fsDir;              // директория на диске (в архиве — директория архива)

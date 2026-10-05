@@ -88,7 +88,7 @@ std::string cellText(const PanelItem &it, ColumnId id, bool archiveMode)
                 case ItemKind::Parent: return "Вверх";
                 case ItemKind::Dir:    return "Директория";
                 case ItemKind::Drive:  return "Диск";
-                default:               return formatNumber(it.size);
+                default:               return formatSize(it.size);
             }
         case ColumnId::Date:
             if (it.kind == ItemKind::Parent || it.kind == ItemKind::Drive || it.date == 0)
@@ -620,17 +620,25 @@ void TPanelWindow::setArchive(CabInfo &&newInfo)
 void TPanelWindow::resort()
 {
     auto num = [](uint64_t a, uint64_t b) { return a < b ? -1 : a > b ? 1 : 0; };
-    auto rank = [](ItemKind k) {
-        return k == ItemKind::Parent ? 0 : k == ItemKind::Dir ? 1 : k == ItemKind::File ? 2 : 3;
+    // Порядок групп: "..", директории, [архивы], файлы, диски.
+    auto rank = [this](const PanelItem &it) {
+        switch (it.kind)
+        {
+            case ItemKind::Parent: return 0;
+            case ItemKind::Dir:    return 1;
+            case ItemKind::File:   return archivesFirst && it.cab ? 2 : 3;
+            default:               return 4;
+        }
     };
     for (PanelItem &it : items)
         if (it.wName.empty() && it.kind != ItemKind::Parent)
         {
             it.wName = fsu::widen(it.name);
             it.wExt = fsu::widen(fsu::extension(it.name));
+            it.cab = it.kind == ItemKind::File && isCab(it.name);
         }
     std::stable_sort(items.begin(), items.end(), [&](const PanelItem &a, const PanelItem &b) {
-        int ra = rank(a.kind), rb = rank(b.kind);
+        int ra = rank(a), rb = rank(b);
         if (ra != rb)
             return ra < rb;
         if (a.kind == ItemKind::Parent || a.kind == ItemKind::Drive || sortKey == SortKey::None)
@@ -904,7 +912,7 @@ void TPanelWindow::enterItem(int index)
         file = extractToTemp(info.entries[it.entry].name);
         if (file.empty())
             return;
-        if (isCab(it.name))
+        if (cabHasSignature(file))
         {
             enterNested(file, it.name);
             return;
@@ -913,7 +921,7 @@ void TPanelWindow::enterItem(int index)
     else
     {
         file = fsu::joinPath(fsDir, it.name);
-        if (isCab(it.name))
+        if (cabHasSignature(file))
         {
             openArchive(file);
             return;
@@ -1068,9 +1076,10 @@ void TPanelWindow::viewFile()
         enterItem(index);
         return;
     }
-    if (it.size > kMaxViewSize)
+    // Большой файл, не похожий на архив, не распаковывается ради отказа.
+    if (it.size > kMaxViewSize && !isCab(it.name) && archiveMode)
     {
-        showError("Файл слишком велик для встроенного просмотра (более 16 МБ).\n"
+        showError("Файл слишком велик для встроенного просмотра (более 16 Мб).\n"
                   "Открыть его во внешней программе можно клавишей Enter.");
         return;
     }
@@ -1084,6 +1093,23 @@ void TPanelWindow::viewFile()
     }
     else
         title = file = fsu::joinPath(fsDir, it.name);
+
+    // Архив (по сигнатуре, а не по расширению) открывается в панели,
+    // остальное — как текст.
+    if (cabHasSignature(file))
+    {
+        if (archiveMode)
+            enterNested(file, it.name);
+        else
+            openArchive(file);
+        return;
+    }
+    if (it.size > kMaxViewSize)
+    {
+        showError("Файл слишком велик для встроенного просмотра (более 16 Мб).\n"
+                  "Открыть его во внешней программе можно клавишей Enter.");
+        return;
+    }
     std::string data;
     if (!fsu::readFile(file, data, kMaxViewSize))
     {
@@ -1113,29 +1139,18 @@ void TPanelWindow::extractFiles()
                                     : fsDir;
         if (!extractDialog(0, 0, opt))
             return;
-        CabResult total;
-        bool ok = runWithProgress("Извлечение", [&](CabProgress *p, std::string &err) {
+        runWithProgress("Извлечение", [&](CabProgress *p, std::string &err) {
             for (const std::string &cab : cabs)
             {
                 std::string dest = cabs.size() == 1
                     ? opt.dest : fsu::joinPath(opt.dest, fsu::stripExt(fsu::baseName(cab)));
                 p->onStage("Извлечение " + fsu::baseName(cab));
-                CabResult r;
-                if (!cabExtract(cab, dest, {}, opt.keepPaths, opt.overwrite, p, err, &r))
+                if (!cabExtract(cab, dest, {}, opt.keepPaths, opt.overwrite, p, err))
                     return false;
-                total.files += r.files;
-                total.skipped += r.skipped;
             }
             return true;
         });
         refresh();
-        if (ok)
-        {
-            std::string msg = "Извлечено: " + pluralFiles(total.files);
-            if (total.skipped)
-                msg += "\nПропущено: " + pluralFiles(total.skipped);
-            showInfo(msg + "\n\n" + opt.dest);
-        }
         return;
     }
 
@@ -1162,18 +1177,10 @@ void TPanelWindow::extractFiles()
         base = inner;
     }
     std::string path = info.path;
-    CabResult res;
-    bool ok = runWithProgress("Извлечение", [&](CabProgress *p, std::string &err) {
+    runWithProgress("Извлечение", [&](CabProgress *p, std::string &err) {
         p->onStage("Извлечение в " + opt.dest);
-        return cabExtract(path, opt.dest, selected, opt.keepPaths, opt.overwrite, p, err, &res, base);
+        return cabExtract(path, opt.dest, selected, opt.keepPaths, opt.overwrite, p, err, nullptr, base);
     });
-    if (ok)
-    {
-        std::string msg = "Извлечено: " + pluralFiles(res.files);
-        if (res.skipped)
-            msg += "\nПропущено: " + pluralFiles(res.skipped);
-        showInfo(msg + "\n\n" + opt.dest);
-    }
 }
 
 void TPanelWindow::addFiles()
