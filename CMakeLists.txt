@@ -113,3 +113,26 @@ target_link_libraries(cabine-shell PRIVATE shell32 ole32 user32)
 if (MSVC)
     target_compile_options(cabine-shell PRIVATE /W3 /utf-8)
 endif()
+
+# ---------------------------------------------------------------------------
+# Тесты ядра (без интерфейса): ctest -C Release
+# ---------------------------------------------------------------------------
+option(CABINE_TESTS "Собирать тесты" ON)
+if (CABINE_TESTS)
+    enable_testing()
+    add_executable(cabine-tests
+        tests/enginetest.cpp
+        src/cabfile.cpp
+        src/format.cpp
+        src/fsutil.cpp
+    )
+    target_compile_features(cabine-tests PRIVATE cxx_std_17)
+    target_compile_definitions(cabine-tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS
+        "CABINE_SFX_STUB=\"$<TARGET_FILE:cabine-sfx>\"")
+    target_link_libraries(cabine-tests PRIVATE cabinet shell32 ole32 user32 advapi32)
+    if (MSVC)
+        target_compile_options(cabine-tests PRIVATE /W3 /utf-8)
+    endif()
+    add_dependencies(cabine-tests cabine-sfx)
+    add_test(NAME engine COMMAND cabine-tests)
+endif()

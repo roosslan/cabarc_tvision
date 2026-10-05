@@ -1,0 +1,93 @@
+# Сборка и тесты на каждый push в trunk и на каждый pull request;
+# на тег вида v2.2 — дополнительно выпуск релиза с собранной программой.
+name: Сборка
+
+on:
+  push:
+    branches: [trunk]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Сборка и тесты (Windows x64)
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Получение исходников с субмодулем tvision
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Версия программы
+        id: version
+        shell: pwsh
+        run: |
+          $m = Select-String -Path src/version.h -Pattern 'CABINE_VERSION "([^"]+)"'
+          $v = $m.Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Версия: $v"
+          # Для релиза тег должен совпадать с версией в src/version.h.
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $tag = $env:GITHUB_REF_NAME.Substring(1)
+            if ($tag -ne $v) {
+              Write-Error "Тег v$tag не совпадает с версией $v в src/version.h"
+              exit 1
+            }
+          }
+
+      - name: Конфигурирование
+        run: cmake -S . -B build -A x64
+
+      - name: Сборка
+        run: cmake --build build --config Release --parallel
+
+      - name: Тесты
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Пакет
+        shell: pwsh
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          $pkg = "cabine-$v-x64"
+          New-Item -ItemType Directory "dist/$pkg" | Out-Null
+          Copy-Item build/Release/cabine.exe, build/Release/cabine-shell.exe, README.md "dist/$pkg"
+          Compress-Archive -Path "dist/$pkg/*" -DestinationPath "dist/$pkg.zip"
+          $hash = (Get-FileHash "dist/$pkg.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $pkg.zip" | Out-File -Encoding ascii "dist/$pkg.zip.sha256"
+
+      - name: Сохранение сборки
+        uses: actions/upload-artifact@v4
+        with:
+          name: cabine-${{ steps.version.outputs.version }}-x64
+          path: |
+            dist/*.zip
+            dist/*.sha256
+
+  release:
+    name: Релиз
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Получение сборки
+        uses: actions/download-artifact@v4
+        with:
+          name: cabine-${{ needs.build.outputs.version }}-x64
+          path: dist
+
+      - name: Создание релиза
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Cabine ${{ needs.build.outputs.version }}" \
+            --generate-notes
