@@ -2,10 +2,10 @@
 
 #include <string>
 
-// Пункты контекстного меню Проводника в HKCU\Software\Classes
+// Подменю «Cabine» контекстного меню Проводника в HKCU\Software\Classes
 // (права администратора не требуются):
-//   файлы и директории — «Добавить в CAB-архив»;
-//   файлы .cab — «Распаковать здесь» и «Открыть в Cabine».
+//   файлы .cab — «Открыть в Cabine», «Распаковать здесь», «Добавить в CAB-архив»;
+//   остальные файлы и директории — «Добавить в CAB-архив».
 bool registerShellMenu(const std::string &cabineExe, const std::string &shellExe, std::string &err);
 bool unregisterShellMenu(std::string &err);
 
