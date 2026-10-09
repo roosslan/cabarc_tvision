@@ -1,16 +1,25 @@
-// Тесты ядра Cabine без интерфейса: работа с CAB (cabfile), файловая
-// система (fsutil), форматирование (format). Запускаются через CTest.
-// Код возврата 0 — все проверки пройдены.
+// Тесты ядра Cabine без интерфейса: работа с CAB (cabfile), ZIP и RAR
+// (archive), файловая система (fsutil), форматирование (format).
+// Запускаются через CTest. Код возврата 0 — все проверки пройдены.
 
 #include <cstdio>
+#include <ctime>
 #include <string>
 #include <vector>
 
+#include "../src/archive.h"
 #include "../src/cabfile.h"
 #include "../src/format.h"
 #include "../src/fsutil.h"
 
 #include <windows.h>
+
+extern "C" {
+#include "mz.h"
+#include "mz_strm.h"
+#include "mz_zip.h"
+#include "mz_zip_rw.h"
+}
 
 namespace {
 
@@ -283,6 +292,275 @@ void testSystemExpand(const std::string &root)
     check(readFile(fsu::joinPath(out, "Привет.txt")) == "Привет", "expand.exe: кириллическое имя");
 }
 
+// ---------------------------------------------------------------------------
+// ZIP и RAR
+// ---------------------------------------------------------------------------
+
+struct ZipItem
+{
+    std::string name;       // имя в архиве (как будет записано)
+    std::string data;
+    bool utf8 = true;       // флаг UTF-8 у имени
+};
+
+// Создание ZIP средствами minizip-ng. password — шифрование PKWARE
+// (aes = false) или WinZip AES.
+bool makeZip(const std::string &path, const std::vector<ZipItem> &items, const char *password = nullptr,
+             bool aes = false, uint16_t method = MZ_COMPRESS_METHOD_DEFLATE)
+{
+    void *w = mz_zip_writer_create();
+    bool ok = mz_zip_writer_open_file(w, path.c_str(), 0, 0) == MZ_OK;
+    if (password)
+        mz_zip_writer_set_password(w, password);
+    mz_zip_writer_set_compress_method(w, method);
+    for (const ZipItem &it : items)
+    {
+        if (!ok)
+            break;
+        mz_zip_file fi = {};
+        fi.version_madeby = (MZ_HOST_SYSTEM_WINDOWS_NTFS << 8) | 45;   // создано в Windows
+        fi.filename = it.name.c_str();
+        fi.modified_date = 1700000000;   // 14.11.2023
+        fi.compression_method = method;
+        fi.flag = it.utf8 ? MZ_ZIP_FLAG_UTF8 : 0;
+        if (password)
+        {
+            fi.flag |= MZ_ZIP_FLAG_ENCRYPTED;
+            if (aes)
+                fi.aes_version = MZ_AES_VERSION;
+        }
+        ok = mz_zip_writer_add_buffer(w, it.data.data(), (int32_t) it.data.size(), &fi) == MZ_OK;
+    }
+    ok = mz_zip_writer_close(w) == MZ_OK && ok;
+    mz_zip_writer_delete(&w);
+    return ok;
+}
+
+// Ответы на запросы пароля: по очереди, затем отказ.
+struct PasswordScript
+{
+    std::vector<std::string> answers;
+    int asked = 0;
+    int retries = 0;
+};
+
+PasswordScript g_script;
+
+bool scriptedPassword(const std::string &, bool retry, std::string &password)
+{
+    if (retry)
+        ++g_script.retries;
+    if (g_script.asked >= (int) g_script.answers.size())
+        return false;
+    password = g_script.answers[g_script.asked++];
+    return true;
+}
+
+void resetPasswords(std::vector<std::string> answers)
+{
+    g_script = PasswordScript();
+    g_script.answers = std::move(answers);
+}
+
+void testZip(const std::string &root, const std::string &big)
+{
+    section("ZIP");
+    std::string dir = fsu::joinPath(root, "zip");
+    fsu::makeDirs(dir);
+    std::vector<ZipItem> items = {
+        {"readme.txt", "Hello, ZIP!\r\n"},
+        {"Документ.txt", "Привет, ZIP!"},
+        {"sub/Вложенный/data.bin", kBinary},
+        {"sub/big.log", big},
+        {"empty.dat", ""},
+    };
+    std::string zip = fsu::joinPath(dir, "sample.zip");
+    check(makeZip(zip, items), "создан ZIP средствами minizip-ng");
+    check(archiveFormat(zip) == ArchiveFormat::Zip, "формат определён по сигнатуре: ZIP");
+
+    std::string err;
+    CabInfo info;
+    check(archRead(zip, info, err) && info.entries.size() == 5 && info.format == ArchiveFormat::Zip,
+          "archRead: 5 файлов " + err);
+    check(hasEntry(info, "Документ.txt") && hasEntry(info, "sub\\Вложенный\\data.bin"),
+          "кириллические имена и вложенные пути");
+    check(info.method == "Deflate", "метод сжатия: " + info.method);
+    check(info.totalSize == 13 + std::string("Привет, ZIP!").size() + kBinary.size() + big.size(),
+          "суммарный размер");
+
+    CabResult res;
+    check(archTest(zip, nullptr, err, &res) && res.files == 5, "archTest " + err);
+
+    std::string out = fsu::joinPath(dir, "out");
+    check(archExtract(zip, out, {}, true, Overwrite::Always, nullptr, err, &res) && res.files == 5,
+          "archExtract все " + err);
+    check(readFile(fsu::joinPath(out, "Документ.txt")) == "Привет, ZIP!", "содержимое кириллического файла");
+    check(readFile(fsu::joinPath(out, "sub\\big.log")) == big, "содержимое большого файла");
+    check(readFile(fsu::joinPath(out, "sub\\Вложенный\\data.bin")) == kBinary, "двоичный файл");
+    check(fsu::fileExists(fsu::joinPath(out, "empty.dat")), "пустой файл");
+
+    WIN32_FILE_ATTRIBUTE_DATA fad;
+    FILETIME local;
+    SYSTEMTIME st;
+    check(GetFileAttributesExW(fsu::widen(fsu::joinPath(out, "readme.txt")).c_str(), GetFileExInfoStandard, &fad) &&
+          FileTimeToLocalFileTime(&fad.ftLastWriteTime, &local) && FileTimeToSystemTime(&local, &st) &&
+          st.wYear == 2023 && st.wMonth == 11,
+          "дата изменения восстановлена");
+
+    std::string based = fsu::joinPath(dir, "based");
+    check(archExtract(zip, based, {"sub\\Вложенный\\data.bin"}, true, Overwrite::Always, nullptr, err, &res, "sub") &&
+          res.files == 1 && readFile(fsu::joinPath(based, "Вложенный\\data.bin")) == kBinary,
+          "выбранный файл с путём относительно директории архива");
+
+    writeFile(fsu::joinPath(out, "readme.txt"), "local");
+    check(archExtract(zip, out, {"readme.txt"}, true, Overwrite::Never, nullptr, err, &res) &&
+          res.skipped == 1 && readFile(fsu::joinPath(out, "readme.txt")) == "local",
+          "без перезаписи существующий файл не тронут");
+
+    CancelProgress cp;
+    check(!archExtract(zip, fsu::joinPath(dir, "cancel"), {}, true, Overwrite::Always, &cp, err) &&
+          err == kCabCancelled,
+          "отмена распаковки");
+
+    // Пароли: PKWARE и WinZip AES; сначала неверный пароль, затем верный.
+    struct { const char *file; bool aes; } enc[] = {{"pkware.zip", false}, {"aes.zip", true}};
+    for (auto &e : enc)
+    {
+        std::string path = fsu::joinPath(dir, e.file);
+        check(makeZip(path, {{"секрет.txt", "тайна"}, {"b.txt", "второй"}}, "Пароль1", e.aes),
+              std::string("создан зашифрованный ") + e.file);
+        CabInfo ei;
+        check(archRead(path, ei, err) && ei.entries.size() == 2, "список зашифрованного архива читается без пароля");
+        resetPasswords({"неверный", "Пароль1"});
+        std::string eo = fsu::joinPath(dir, std::string("out_") + e.file);
+        check(archExtract(path, eo, {}, true, Overwrite::Always, nullptr, err, &res) && res.files == 2,
+              std::string(e.file) + ": распаковка после повторного ввода пароля " + err);
+        check(g_script.asked == 2 && g_script.retries == 1, "пароль спрошен дважды, второй раз как повтор");
+        check(readFile(fsu::joinPath(eo, "секрет.txt")) == "тайна", std::string(e.file) + ": содержимое");
+        resetPasswords({});
+        check(archTest(path, nullptr, err), "введённый пароль запомнен для архива");
+    }
+    std::string noPw = fsu::joinPath(dir, "nopw.zip");
+    makeZip(noPw, {{"x.txt", "x"}}, "abc");
+    resetPasswords({});
+    check(!archExtract(noPw, fsu::joinPath(dir, "out_nopw"), {}, true, Overwrite::Always, nullptr, err) &&
+          err == kCabCancelled,
+          "отказ от ввода пароля прерывает распаковку");
+
+    // Имя без флага UTF-8 — в кодовой странице OEM (так пишет «Сжатая папка» Windows).
+    std::wstring wname = L"Отчёт.txt";
+    char oem[64];
+    BOOL lossy = FALSE;
+    int n = WideCharToMultiByte(CP_OEMCP, 0, wname.c_str(), -1, oem, sizeof(oem), nullptr, &lossy);
+    if (n > 0 && !lossy)
+    {
+        std::string path = fsu::joinPath(dir, "oem.zip");
+        makeZip(path, {{oem, "OEM", false}});
+        CabInfo oi;
+        check(archRead(path, oi, err) && hasEntry(oi, "Отчёт.txt"), "имя в кодовой странице OEM");
+    }
+    else
+        fsu::printConsole("пропущено: кодовая страница OEM не содержит кириллицы\n");
+
+    std::string bad = fsu::joinPath(dir, "bad.zip");
+    writeFile(bad, std::string("PK\x03\x04", 4) + "мусор");
+    check(!archRead(bad, info, err), "повреждённый ZIP отвергается: " + err);
+}
+
+void testRar(const std::string &root)
+{
+    section("RAR");
+    std::string data = CABINE_TEST_DATA;
+    std::string dir = fsu::joinPath(root, "rar");
+    std::string err;
+    CabResult res;
+
+    std::string rar5 = fsu::joinPath(data, "sample5.rar");
+    check(archiveFormat(rar5) == ArchiveFormat::Rar, "формат определён по сигнатуре: RAR");
+    CabInfo info;
+    check(archRead(rar5, info, err) && info.entries.size() == 3 && info.format == ArchiveFormat::Rar,
+          "archRead RAR5 (solid): 3 файла " + err);
+    check(hasEntry(info, "Документ.txt") && hasEntry(info, "sub\\Вложенный\\data.bin"),
+          "кириллические имена и вложенные пути");
+    check(info.method == "RAR5", "метод: " + info.method);
+    check(archTest(rar5, nullptr, err, &res) && res.files == 3, "archTest " + err);
+
+    std::string out = fsu::joinPath(dir, "out5");
+    check(archExtract(rar5, out, {}, true, Overwrite::Always, nullptr, err, &res) && res.files == 3,
+          "archExtract все " + err);
+    check(readFile(fsu::joinPath(out, "readme.txt")) == "Hello, RAR!\r\n", "readme.txt");
+    check(readFile(fsu::joinPath(out, "Документ.txt")) == "Привет, RAR!", "кириллический файл");
+    std::string bin;
+    for (int k = 0; k < 4; ++k)
+        for (int i = 0; i < 256; ++i)
+            bin += (char) i;
+    check(readFile(fsu::joinPath(out, "sub\\Вложенный\\data.bin")) == bin, "двоичный файл");
+
+    std::string one = fsu::joinPath(dir, "one");
+    check(archExtract(rar5, one, {"sub\\Вложенный\\data.bin"}, false, Overwrite::Always, nullptr, err, &res) &&
+          res.files == 1 && readFile(fsu::joinPath(one, "data.bin")) == bin,
+          "выбранный файл из solid-архива без путей");
+
+    writeFile(fsu::joinPath(out, "readme.txt"), "local");
+    check(archExtract(rar5, out, {"readme.txt"}, true, Overwrite::Never, nullptr, err, &res) &&
+          res.skipped == 1 && readFile(fsu::joinPath(out, "readme.txt")) == "local",
+          "без перезаписи существующий файл не тронут");
+
+    // Пароль на данные: список читается, распаковка спрашивает пароль.
+    std::string secret = fsu::joinPath(data, "secret5.rar");
+    check(archRead(secret, info, err) && info.entries.size() == 3, "список RAR с паролем читается без пароля");
+    resetPasswords({"Пароль1"});
+    std::string so = fsu::joinPath(dir, "secret");
+    check(archExtract(secret, so, {}, true, Overwrite::Always, nullptr, err, &res) && res.files == 3,
+          "распаковка RAR с паролем " + err);
+    check(g_script.asked == 1 && readFile(fsu::joinPath(so, "Документ.txt")) == "Привет, RAR!",
+          "пароль спрошен один раз, содержимое верное");
+
+    // Зашифрованные заголовки: пароль нужен уже для списка; неверный — повторный запрос.
+    std::string hdr = fsu::joinPath(data, "secrethdr.rar");
+    resetPasswords({"неверный", "Пароль1"});
+    check(archRead(hdr, info, err) && info.entries.size() == 3, "список RAR с шифрованием заголовков " + err);
+    check(g_script.asked == 2 && g_script.retries >= 1, "после неверного пароля спрошен снова");
+    resetPasswords({});
+    check(archTest(hdr, nullptr, err), "пароль запомнен для архива " + err);
+
+    // Многотомный архив.
+    std::string vol = fsu::joinPath(data, "vol.part1.rar");
+    check(archRead(vol, info, err) && info.entries.size() == 1 && info.entries[0].size == 60000,
+          "многотомный архив: один файл 60000 байт " + err);
+    std::string vo = fsu::joinPath(dir, "vol");
+    check(archExtract(vol, vo, {}, true, Overwrite::Always, nullptr, err, &res), "распаковка многотомного " + err);
+    std::string expect;
+    uint32_t seed = 1;
+    for (int i = 0; i < 60000; ++i)
+    {
+        seed = seed * 1103515245u + 12345u;
+        expect += (char) ((seed >> 16) & 0xFF);
+    }
+    check(readFile(fsu::joinPath(vo, "big.bin")) == expect, "содержимое файла из трёх томов");
+
+    std::string lone = fsu::joinPath(dir, "lone");
+    fsu::makeDirs(lone);
+    CopyFileW(fsu::widen(vol).c_str(), fsu::widen(fsu::joinPath(lone, "vol.part1.rar")).c_str(), FALSE);
+    bool extracted = archExtract(fsu::joinPath(lone, "vol.part1.rar"), fsu::joinPath(lone, "out"), {}, true,
+                                 Overwrite::Always, nullptr, err);
+    check(!extracted && err.find("том") != std::string::npos, "без следующего тома — понятная ошибка: " + err);
+}
+
+void testDetection(const std::string &root)
+{
+    section("Определение формата");
+    std::string txt = fsu::joinPath(root, "plain.txt");
+    writeFile(txt, "просто текст");
+    check(archiveFormat(txt) == ArchiveFormat::Unknown && !isArchive(txt), "текстовый файл — не архив");
+    CabInfo info;
+    std::string err;
+    check(!archRead(txt, info, err), "archRead отвергает не-архив: " + err);
+    check(archiveFormat(fsu::joinPath(root, "mszip.cab")) == ArchiveFormat::Cab, "CAB по сигнатуре");
+    check(hasArchiveExtension("a.ZIP") && hasArchiveExtension("b.rar") && !hasArchiveExtension("c.7z"),
+          "расширения архивов");
+}
+
 } // namespace
 
 int main()
@@ -327,6 +605,10 @@ int main()
     testUpdate(root);
     testSfx(root, sources, big);
     testSystemExpand(root);
+    setPasswordPrompt(scriptedPassword);
+    testZip(root, big);
+    testRar(root);
+    testDetection(root);
 
     fsu::printConsole("\nПроверок: " + std::to_string(checks) + ", ошибок: " + std::to_string(failures) + "\n");
     if (failures == 0)

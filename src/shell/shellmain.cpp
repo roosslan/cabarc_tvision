@@ -8,6 +8,7 @@
 //
 // cabine-shell.exe -a <путь>   добавить в архив
 // cabine-shell.exe -x <путь>   распаковать архив
+// cabine-shell.exe -e <путь>   распаковать архив в поддиректорию с его именем
 
 #include <windows.h>
 
@@ -30,7 +31,8 @@ std::wstring channelName(const std::string &mode)
 {
     DWORD session = 0;
     ProcessIdToSessionId(GetCurrentProcessId(), &session);
-    return std::wstring(L"Cabine.Shell") + (mode == "-a" ? L".Add." : L".Extract.") +
+    const wchar_t *kind = mode == "-a" ? L".Add." : mode == "-x" ? L".Extract." : L".ExtractDir.";
+    return std::wstring(L"Cabine.Shell") + kind +
            std::to_wstring(session);
 }
 
@@ -179,12 +181,13 @@ bool launchCabine(const std::string &mode, const std::vector<std::string> &paths
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 {
     std::vector<std::string> args = fsu::commandLineArgs();
-    if (args.size() < 2 || (args[0] != "-a" && args[0] != "-x"))
+    if (args.size() < 2 || (args[0] != "-a" && args[0] != "-x" && args[0] != "-e"))
     {
         MessageBoxW(nullptr,
                     L"cabine-shell.exe вызывается из контекстного меню Проводника:\n"
                     L"cabine-shell.exe -a <путь>  — добавить в CAB-архив\n"
-                    L"cabine-shell.exe -x <путь>  — распаковать CAB-архив",
+                    L"cabine-shell.exe -x <путь>  — распаковать архив\n"
+                    L"cabine-shell.exe -e <путь>  — распаковать архив в поддиректорию",
                     L"Cabine", MB_ICONINFORMATION);
         return 2;
     }

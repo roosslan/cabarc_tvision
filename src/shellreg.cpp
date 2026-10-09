@@ -9,12 +9,15 @@ namespace {
 const wchar_t *const kRoot = L"Software\\Classes\\";
 
 // Подменю «Cabine» для всех файлов и директорий. Порядок пунктов задаётся
-// именами разделов; пункты для архива показываются только у файлов .cab.
+// именами разделов; пункты для архива показываются только у файлов .cab,
+// .zip и .rar.
 const wchar_t *const kMenuKey = L"AllFilesystemObjects\\shell\\Cabine";
 const wchar_t *const kOpenKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\01open";
 const wchar_t *const kExtractKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\02extract";
-const wchar_t *const kAddKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\03add";
-const wchar_t *const kOnlyCab = L"System.FileExtension:=.cab";
+const wchar_t *const kExtractDirKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\03extractdir";
+const wchar_t *const kAddKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\04add";
+const wchar_t *const kOnlyArchives =
+    L"System.FileExtension:=.cab OR System.FileExtension:=.zip OR System.FileExtension:=.rar";
 
 // Отдельные пункты прежних версий: удаляются при регистрации и её отмене.
 const wchar_t *const kLegacyKeys[] = {
@@ -110,9 +113,11 @@ bool registerShellMenu(const std::string &cabineExe, const std::string &shellExe
     bool ok = deleteLegacy(err) && deleteVerb(kMenuKey, err) &&
         writeVerb({kMenuKey, L"Cabine", icon, L"", L"Player", nullptr}, err) &&
         writeVerb({kOpenKey, L"Открыть в Cabine", icon,
-                   quoted(cabineExe) + L" \"%1\"", L"Single", kOnlyCab}, err) &&
+                   quoted(cabineExe) + L" \"%1\"", L"Single", kOnlyArchives}, err) &&
         writeVerb({kExtractKey, L"Распаковать здесь", icon,
-                   quoted(shellExe) + L" -x \"%1\"", L"Player", kOnlyCab}, err) &&
+                   quoted(shellExe) + L" -x \"%1\"", L"Player", kOnlyArchives}, err) &&
+        writeVerb({kExtractDirKey, L"Извлечь в директорию с именем архива", icon,
+                   quoted(shellExe) + L" -e \"%1\"", L"Player", kOnlyArchives}, err) &&
         writeVerb({kAddKey, L"Добавить в CAB-архив", icon,
                    quoted(shellExe) + L" -a \"%1\"", L"Player", nullptr}, err);
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
@@ -171,7 +176,7 @@ bool setCabAssociation(bool enable, const std::string &cabineExe, std::string &e
         std::wstring previous;
         bool ok =
             setKeyValue(progKey, nullptr, L"CAB-архив") &&
-            setKeyValue(progKey + L"\\DefaultIcon", nullptr, exe + L",0") &&
+            setKeyValue(progKey + L"\\DefaultIcon", nullptr, exe + L",-2") &&
             setKeyValue(progKey + L"\\shell", nullptr, L"open") &&
             setKeyValue(progKey + L"\\shell\\open", L"MUIVerb", L"Открыть в Cabine") &&
             setKeyValue(progKey + L"\\shell\\open\\command", nullptr, exe + L" \"%1\"");
