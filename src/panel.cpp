@@ -18,6 +18,7 @@
 #include <unordered_map>
 
 #include "app.h"
+#include "archive.h"
 #include "commands.h"
 #include "dialogs.h"
 #include "format.h"
@@ -45,7 +46,7 @@ const uint64_t kMaxViewSize = 16 * 1024 * 1024;
 
 bool isCab(const std::string &name)
 {
-    return fsu::upper(fsu::extension(name)) == "CAB";
+    return hasArchiveExtension(name);
 }
 
 std::string pluralDirs(uint64_t n)
@@ -134,14 +135,17 @@ std::string propertiesText(const CabInfo &i, const std::string &display)
     std::string t;
     t += "Архив:            " + fsu::baseName(display) + "\n";
     t += "Директория:       " + fsu::dirName(display) + "\n";
+    t += "Формат:           " + std::string(formatName(i.format)) + "\n";
     t += "Размер:           " + formatNumber(i.fileSize) + " байт (" + formatSize(i.fileSize) + ")\n";
     t += "Файлов:           " + formatNumber(i.entries.size()) + "\n";
     t += "Исходный размер:  " + formatNumber(i.totalSize) + " байт (" + formatSize(i.totalSize) + ")\n";
     if (i.offset)
         t += "Распаковщик:      " + formatNumber(i.offset) + " байт (самораспаковывающийся архив)\n";
     t += "Степень сжатия:   " + formatRatio(i.fileSize - i.offset, i.totalSize) + "\n";
-    t += "Метод сжатия:     " + i.method + "\n";
-    t += "Блоков (папок):   " + formatNumber(i.folders) + "\n";
+    t += "Метод сжатия:     " + i.method;
+    if (i.format != ArchiveFormat::Cab)
+        return t;
+    t += "\nБлоков (папок):   " + formatNumber(i.folders) + "\n";
     t += "Набор:            ID " + std::to_string(i.setID) + ", том " + std::to_string(i.iCabinet + 1);
     if (i.hasPrev)
         t += "\nПредыдущий том:   " + i.prevCab;
@@ -757,7 +761,7 @@ bool TPanelWindow::openArchive(const std::string &path, const std::string &inner
 {
     CabInfo newInfo;
     std::string err;
-    if (!cabRead(path, newInfo, err))
+    if (!archRead(path, newInfo, err))
     {
         showError("Не удалось открыть архив\n" + path + "\n\n" + err);
         return false;
@@ -784,7 +788,7 @@ void TPanelWindow::enterNested(const std::string &tempPath, const std::string &n
 {
     CabInfo newInfo;
     std::string err;
-    if (!cabRead(tempPath, newInfo, err))
+    if (!archRead(tempPath, newInfo, err))
     {
         showError("Не удалось открыть архив\n" + name + "\n\n" + err);
         return;
@@ -819,7 +823,7 @@ void TPanelWindow::goUp()
         Frame f = parents.back();
         CabInfo parentInfo;
         std::string err;
-        if (!cabRead(f.archive, parentInfo, err))
+        if (!archRead(f.archive, parentInfo, err))
         {
             showError("Не удалось открыть архив\n" + f.display + "\n\n" + err);
             openDirectory(fsDir);
@@ -846,7 +850,7 @@ void TPanelWindow::refresh()
     {
         CabInfo newInfo;
         std::string err;
-        if (!cabRead(info.path, newInfo, err))
+        if (!archRead(info.path, newInfo, err))
         {
             showError("Не удалось перечитать архив\n" + archiveDisplay + "\n\n" + err);
             openDirectory(fsu::existingDir(fsDir));
@@ -917,7 +921,7 @@ void TPanelWindow::enterItem(int index)
         file = extractToTemp(info.entries[it.entry].name);
         if (file.empty())
             return;
-        if (cabHasSignature(file))
+        if (isArchive(file))
         {
             enterNested(file, it.name);
             return;
@@ -926,7 +930,7 @@ void TPanelWindow::enterItem(int index)
     else
     {
         file = fsu::joinPath(fsDir, it.name);
-        if (cabHasSignature(file))
+        if (isArchive(file))
         {
             openArchive(file);
             return;
@@ -1065,7 +1069,7 @@ std::string TPanelWindow::extractToTemp(const std::string &entryName)
     std::string path = info.path;
     bool ok = runWithProgress("Распаковка", [&](CabProgress *p, std::string &err) {
         p->onStage("Распаковка во временную директорию");
-        return cabExtract(path, dir, {entryName}, false, Overwrite::Always, p, err);
+        return archExtract(path, dir, {entryName}, false, Overwrite::Always, p, err);
     });
     return ok ? cabTargetPath(dir, entryName, false) : std::string();
 }
@@ -1102,7 +1106,7 @@ void TPanelWindow::viewFile()
     // Архив (по сигнатуре, а не по расширению) открывается в панели,
     // остальное — как текст. Содержимое самораспаковывающегося архива
     // тоже показывается в панели (Enter такой архив запускает).
-    if (cabHasSignature(file, true))
+    if (isArchive(file, true))
     {
         if (archiveMode)
             enterNested(file, it.name);
@@ -1151,7 +1155,7 @@ void TPanelWindow::extractFiles()
                 std::string dest = cabs.size() == 1
                     ? opt.dest : fsu::joinPath(opt.dest, fsu::stripExt(fsu::baseName(cab)));
                 p->onStage("Извлечение " + fsu::baseName(cab));
-                if (!cabExtract(cab, dest, {}, opt.keepPaths, opt.overwrite, p, err))
+                if (!archExtract(cab, dest, {}, opt.keepPaths, opt.overwrite, p, err))
                     return false;
             }
             return true;
@@ -1185,7 +1189,7 @@ void TPanelWindow::extractFiles()
     std::string path = info.path;
     runWithProgress("Извлечение", [&](CabProgress *p, std::string &err) {
         p->onStage("Извлечение в " + opt.dest);
-        return cabExtract(path, opt.dest, selected, opt.keepPaths, opt.overwrite, p, err, nullptr, base);
+        return archExtract(path, opt.dest, selected, opt.keepPaths, opt.overwrite, p, err, nullptr, base);
     });
 }
 
@@ -1202,8 +1206,7 @@ void TPanelWindow::addFiles()
     {
         if (readOnly())
         {
-            showError("Вложенный архив открыт только для чтения: изменения не попали бы "
-                      "в родительский архив.");
+            showError(readOnlyReason());
             return;
         }
         archivePath = info.path;
@@ -1364,8 +1367,7 @@ void TPanelWindow::deleteFiles()
         return;
     if (readOnly())
     {
-        showError("Вложенный архив открыт только для чтения: изменения не попали бы "
-                  "в родительский архив.");
+        showError(readOnlyReason());
         return;
     }
     if (info.hasPrev || info.hasNext)
@@ -1415,7 +1417,7 @@ void TPanelWindow::testArchive()
     CabResult res;
     bool ok = runWithProgress("Проверка архива", [&](CabProgress *p, std::string &err) {
         p->onStage("Проверка " + fsu::baseName(display));
-        return cabTest(path, p, err, &res);
+        return archTest(path, p, err, &res);
     });
     if (ok)
         showInfo("Ошибок не обнаружено.\nПроверено: " + pluralFiles(res.files) + ".");
@@ -1436,7 +1438,7 @@ void TPanelWindow::showProperties()
     }
     CabInfo cab;
     std::string err;
-    if (!cabRead(path, cab, err))
+    if (!archRead(path, cab, err))
     {
         showError("Не удалось открыть архив\n" + path + "\n\n" + err);
         return;

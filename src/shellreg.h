@@ -4,7 +4,8 @@
 
 // Подменю «Cabine» контекстного меню Проводника в HKCU\Software\Classes
 // (права администратора не требуются):
-//   файлы .cab — «Открыть в Cabine», «Распаковать здесь», «Добавить в CAB-архив»;
+//   файлы .cab, .zip, .rar — «Открыть в Cabine», «Распаковать здесь»,
+//     «Извлечь в директорию с именем архива», «Добавить в CAB-архив»;
 //   остальные файлы и директории — «Добавить в CAB-архив».
 bool registerShellMenu(const std::string &cabineExe, const std::string &shellExe, std::string &err);
 bool unregisterShellMenu(std::string &err);

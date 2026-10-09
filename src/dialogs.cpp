@@ -1145,6 +1145,47 @@ bool askText(const char *title, const char *label, std::string &value)
     return ok && !value.empty();
 }
 
+namespace {
+
+// Строка ввода пароля: вместо символов выводятся звёздочки (по одной на байт,
+// чтобы позиции курсора в байтах совпадали с выводом).
+class TPasswordLine : public TInputLine
+{
+public:
+    using TInputLine::TInputLine;
+
+    void draw() override
+    {
+        size_t n = strlen(data);
+        std::string saved(data, n);
+        memset(data, '*', n);
+        TInputLine::draw();
+        memcpy(data, saved.data(), n);
+    }
+};
+
+} // namespace
+
+bool askPassword(const std::string &archive, bool retry, std::string &password)
+{
+    std::string text = (retry ? "Неверный пароль. " : std::string()) +
+                       "Архив зашифрован:\n" + fsu::baseName(archive);
+    TDialog *d = new TDialog(TRect(0, 0, 60, 12), "Пароль");
+    d->options |= ofCentered;
+    d->insert(new TMultiText(TRect(3, 2, 57, 4), text));
+    TInputLine *input = new TPasswordLine(TRect(3, 6, 57, 7), 256);
+    d->insert(input);
+    d->insert(new TLabel(TRect(2, 5, 30, 6), "~П~ароль:", input));
+    d->insert(new TButton(TRect(17, 9, 29, 11), "O~K~", cmOK, bfDefault));
+    d->insert(new TButton(TRect(31, 9, 43, 11), "Отмена", cmCancel, bfNormal));
+    d->selectNext(False);
+    bool ok = TProgram::deskTop->execView(d) == cmOK;
+    if (ok)
+        password = input->data;
+    TObject::destroy(d);
+    return ok;
+}
+
 bool askMask(const char *title, std::string &mask)
 {
     return askText(title, "~М~аска:", mask);
