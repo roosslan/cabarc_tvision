@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 // Программа-распаковщик самораспаковывающегося архива, встроенная
@@ -12,3 +13,7 @@ std::string sfxPath(const std::string &path);
 // Подготовка к созданию самораспаковывающегося архива: имя меняется на .exe
 // (замена существующего файла подтверждается), загружается распаковщик.
 bool prepareSfx(std::string &path, std::string &stub);
+
+// Многотомный архив: если рядом уже есть файлы томов (<имя>2.cab...),
+// спрашивает, заменять ли их. Без томов (volumeSize == 0) — true.
+bool confirmVolumes(const std::string &firstVolume, uint64_t volumeSize);

@@ -1,6 +1,7 @@
 #include <cstdio>
 
 #include "format.h"
+#include "fsutil.h"
 
 std::string formatNumber(uint64_t n)
 {
@@ -82,4 +83,58 @@ std::string pluralFiles(uint64_t n)
             word = "файла";
     }
     return formatNumber(n) + " " + word;
+}
+
+bool parseSize(const std::string &textIn, uint64_t &bytes)
+{
+    std::string text = fsu::upper(textIn);
+    size_t a = text.find_first_not_of(' '), b = text.find_last_not_of(' ');
+    text = a == std::string::npos ? std::string() : text.substr(a, b - a + 1);
+    bytes = 0;
+    if (text.empty() || text.rfind("НЕ ", 0) == 0 || text == "0")
+        return true;
+
+    size_t pos = 0;
+    double value = 0, frac = 0.1;
+    bool digits = false, point = false;
+    for (; pos < text.size(); ++pos)
+    {
+        char c = text[pos];
+        if (c >= '0' && c <= '9')
+        {
+            digits = true;
+            if (point)
+            {
+                value += (c - '0') * frac;
+                frac /= 10;
+            }
+            else
+                value = value * 10 + (c - '0');
+        }
+        else if ((c == ',' || c == '.') && !point)
+            point = true;
+        else
+            break;
+    }
+    if (!digits)
+        return false;
+    std::string unit = text.substr(pos);
+    unit.erase(0, unit.find_first_not_of(' '));
+    double mult;
+    if (unit.empty() || unit == "Б" || unit == "B")
+        mult = 1;
+    else if (unit == "КБ" || unit == "К" || unit == "KB" || unit == "K")
+        mult = 1024.0;
+    else if (unit == "МБ" || unit == "М" || unit == "MB" || unit == "M")
+        mult = 1024.0 * 1024;
+    else if (unit == "ГБ" || unit == "Г" || unit == "GB" || unit == "G")
+        mult = 1024.0 * 1024 * 1024;
+    else
+        return false;
+    // «1,44 Мб» — дискета: 1440 Кб, как принято для её размера.
+    if (mult == 1024.0 * 1024 && value > 1.4399 && value < 1.4401)
+        bytes = 1457664;
+    else
+        bytes = (uint64_t) (value * mult + 0.5);
+    return true;
 }

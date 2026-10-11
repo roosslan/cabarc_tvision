@@ -53,7 +53,7 @@ TCabineApp &cabApp()
 TCabineApp::TCabineApp() :
     TProgInit(&TCabineApp::initStatusLine, &TCabineApp::initMenuBar, &TCabineApp::initDeskTop)
 {
-    defaultCompression = compressionFromName(fsu::loadSetting("Compression", "mszip"));
+    defaultCompression = compressionFromName(fsu::loadSetting("Compression", "lzx21"));
     setPasswordPrompt(askPassword);
 }
 
@@ -239,12 +239,15 @@ void TCabineApp::newArchive()
     std::string stub;
     if (opt.sfx && !prepareSfx(path, stub))
         return;
+    if (!confirmVolumes(path, opt.volumeSize))
+        return;
     std::vector<CabSource> sources;
     if (!collectSources(opt, sources))
         return;
     CompressionSpec comp = opt.compression;
+    uint64_t volume = opt.volumeSize;
     if (runWithProgress("Создание архива", [&](CabProgress *p, std::string &err) {
-            return cabCreate(path, sources, comp, p, err, stub);
+            return cabCreate(path, sources, comp, p, err, stub, volume);
         }))
         openPath(path);
 }
@@ -259,10 +262,12 @@ void TCabineApp::openArchiveDialog()
 void TCabineApp::options()
 {
     Settings s;
-    s.associate = isCabAssociated();
+    s.associateCab = isAssociated("cab");
+    s.associateZip = isAssociated("zip");
+    s.associateRar = isAssociated("rar");
     s.archivesFirst = panel ? panel->archivesFirst : fsu::loadSetting("ArchivesFirst", "0") == "1";
     s.compression = defaultCompression;
-    bool wasAssociated = s.associate;
+    Settings was = s;
     if (!settingsDialog(s))
         return;
 
@@ -275,16 +280,27 @@ void TCabineApp::options()
         panel->refresh();
     }
 
-    if (s.associate != wasAssociated)
+    // Ассоциации меняются только у тех расширений, где изменилась галочка.
+    struct { const char *ext; bool now, before; } assoc[] = {
+        {"cab", s.associateCab, was.associateCab},
+        {"zip", s.associateZip, was.associateZip},
+        {"rar", s.associateRar, was.associateRar},
+    };
+    std::string overridden;
+    for (const auto &a : assoc)
     {
+        if (a.now == a.before)
+            continue;
         std::string err;
-        if (!setCabAssociation(s.associate, fsu::exePath(), err))
+        if (!setAssociation(a.ext, a.now, fsu::exePath(), err))
             showError(err);
-        else if (s.associate && cabUserChoiceOverrides())
-            showInfo("Ассоциация записана, но для файлов .cab в Windows выбрана другая программа "
-                     "(«Открыть с помощью» → «Всегда использовать»).\n"
-                     "Чтобы двойной щелчок открывал Cabine, необходимо выбрать её там.");
+        else if (a.now && userChoiceOverrides(a.ext))
+            overridden += std::string(overridden.empty() ? "" : ", ") + "." + a.ext;
     }
+    if (!overridden.empty())
+        showInfo("Ассоциация записана, но для файлов " + overridden + " в Windows выбрана другая "
+                 "программа («Открыть с помощью» → «Всегда использовать»).\n"
+                 "Чтобы двойной щелчок открывал Cabine, необходимо выбрать её там.");
 }
 
 void TCabineApp::about()
@@ -364,18 +380,26 @@ void TCabineApp::batchAdd(bool ask)
         exists = fsu::fileExists(cab) && cabRead(cab, existing, err);
     }
 
-    // -ai: предлагаемое имя можно изменить; расширение .exe — самораспаковывающийся архив.
+    // -ai: окно «Добавить в архив»: имя архива, степень сжатия, размер тома и
+    // самораспаковывающийся архив. Имя с расширением .exe — тоже самораспаковывающийся.
     std::string stub;
+    CompressionSpec comp = exists && !existing.entries.empty() ? existing.compression : defaultCompression;
+    uint64_t volume = 0;
     if (ask)
     {
-        std::string chosen = cab;
+        ArchiveTarget t;
+        t.path = cab;
+        t.compression = comp;
         for (;;)
         {
-            if (!askPath("Добавить в архив", "~А~рхив:", PathKind::File, "*.cab", chosen))
+            if (!archiveTargetDialog("Добавить в архив", t))
                 return;
-            std::string path = fsu::fullPath(fsu::isAbsolutePath(chosen) ? chosen : fsu::joinPath(dir, chosen));
+            std::string path = fsu::fullPath(fsu::isAbsolutePath(t.path) ? t.path : fsu::joinPath(dir, t.path));
             if (fsu::extension(path).empty())
                 path += ".cab";
+            bool sfx = t.sfx || fsu::upper(fsu::extension(path)) == "EXE";
+            if (sfx)
+                path = sfxPath(path);
             if (fsu::dirExists(path))
             {
                 showError("Существует директория с таким именем\n" + path);
@@ -388,12 +412,22 @@ void TCabineApp::batchAdd(bool ask)
                 showError("Файл существует и не является CAB-архивом\n" + path + "\n\n" + err);
                 continue;
             }
-            if (!exists && fsu::upper(fsu::extension(path)) == "EXE" && !sfxStub(stub, err))
+            if (exists && (t.volumeSize || (t.sfx && existing.offset == 0)))
+            {
+                showError("Архив уже существует:\n" + path + "\n\nМноготомный и самораспаковывающийся "
+                          "архивы создаются только новыми — необходимо указать другое имя.");
+                continue;
+            }
+            if (!exists && sfx && !sfxStub(stub, err))
             {
                 showError(err);
                 return;
             }
+            if (!exists && !confirmVolumes(path, t.volumeSize))
+                continue;
             cab = path;
+            comp = t.compression;
+            volume = exists ? 0 : t.volumeSize;
             break;
         }
     }
@@ -407,7 +441,7 @@ void TCabineApp::batchAdd(bool ask)
     opt.items = items;
     opt.recurse = true;
     opt.keepPaths = true;
-    opt.compression = exists && !existing.entries.empty() ? existing.compression : defaultCompression;
+    opt.compression = comp;
     std::vector<CabSource> sources;
     if (!collectSources(opt, sources))
         return;
@@ -418,12 +452,11 @@ void TCabineApp::batchAdd(bool ask)
     if (sources.empty())
         return;
 
-    CompressionSpec comp = opt.compression;
     runWithProgress(exists ? "Добавление в архив" : "Создание архива",
         [&](CabProgress *p, std::string &e) {
             p->onStage(fsu::baseName(cab));
             return exists ? cabUpdate(cab, {}, sources, comp, p, e)
-                          : cabCreate(cab, sources, comp, p, e, stub);
+                          : cabCreate(cab, sources, comp, p, e, stub, volume);
         }, kBatchHoldMs);
 }
 

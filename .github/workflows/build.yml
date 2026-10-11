@@ -50,23 +50,42 @@ jobs:
       - name: Тесты
         run: ctest --test-dir build -C Release --output-on-failure
 
+      # Пакет — CAB-архив (LZX:21), созданный системным makecab.exe; файлы
+      # лежат в нём в директории cabine-<версия>-x64.
       - name: Пакет
         shell: pwsh
         run: |
           $v = "${{ steps.version.outputs.version }}"
           $pkg = "cabine-$v-x64"
-          New-Item -ItemType Directory "dist/$pkg" | Out-Null
-          Copy-Item build/Release/cabine.exe, build/Release/cabine-shell.exe, README.md "dist/$pkg"
-          Compress-Archive -Path "dist/$pkg/*" -DestinationPath "dist/$pkg.zip"
-          $hash = (Get-FileHash "dist/$pkg.zip" -Algorithm SHA256).Hash.ToLower()
-          "$hash  $pkg.zip" | Out-File -Encoding ascii "dist/$pkg.zip.sha256"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $ddf = @(
+            '.OPTION EXPLICIT'
+            ".Set CabinetNameTemplate=$pkg.cab"
+            '.Set DiskDirectoryTemplate=dist'
+            '.Set Cabinet=on'
+            '.Set Compress=on'
+            '.Set CompressionType=LZX'
+            '.Set CompressionMemory=21'
+            '.Set MaxDiskSize=0'
+            '.Set RptFileName=NUL'
+            '.Set InfFileName=NUL'
+            ".Set DestinationDir=$pkg"
+            '"build\Release\cabine.exe"'
+            '"build\Release\cabine-shell.exe"'
+            '"README.md"'
+          )
+          $ddf | Set-Content -Encoding ascii package.ddf
+          makecab.exe /F package.ddf
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $hash = (Get-FileHash "dist/$pkg.cab" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $pkg.cab" | Out-File -Encoding ascii "dist/$pkg.cab.sha256"
 
       - name: Сохранение сборки
         uses: actions/upload-artifact@v4
         with:
           name: cabine-${{ steps.version.outputs.version }}-x64
           path: |
-            dist/*.zip
+            dist/*.cab
             dist/*.sha256
 
   release:

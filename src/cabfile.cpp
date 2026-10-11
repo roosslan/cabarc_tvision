@@ -36,7 +36,8 @@ const uint16_t kHdrReservePresent = 0x0004;
 std::string decodeName(const std::string &raw, uint16_t attribs)
 {
     std::string name;
-    if ((attribs & _A_NAME_IS_UTF) || fsu::isAscii(raw))
+    // Имена томов флага не имеют: Cabine пишет их в UTF-8, его и распознаём.
+    if ((attribs & _A_NAME_IS_UTF) || fsu::isAscii(raw) || fsu::isValidUtf8(raw))
         name = raw;
     else
         name = fsu::fromCodePage(raw, CP_ACP);
@@ -208,6 +209,8 @@ struct FdiContext
     std::string cabFile;        // полный путь архива в верхнем регистре
     uint64_t cabOffset = 0;     // смещение архива в файле
     std::unordered_set<INT_PTR> shifted;    // дескрипторы, открытые со смещением
+    bool cabInfoSeen = false;   // получены сведения о начальном томе FDICopy
+    std::string nextName;       // следующий том начального тома (как в заголовке)
     std::string destDir;
     std::unordered_set<std::string> wanted;
     bool all = true;
@@ -363,6 +366,15 @@ FNFDINOTIFY(fdiNotify)
             return c.copyFile(pfdin);
         case fdintCLOSE_FILE_INFO:
             return c.closeFile(pfdin);
+        case fdintCABINET_INFO:
+            // Первое уведомление в FDICopy относится к начальному тому: имя
+            // его следующего тома (последующие — при заходе за продолжением файла).
+            if (!c.cabInfoSeen)
+            {
+                c.cabInfoSeen = true;
+                c.nextName = pfdin->psz1 ? pfdin->psz1 : "";
+            }
+            return 0;
         case fdintNEXT_CABINET:
             // FDI ищет следующий том в той же директории.
             if (pfdin->fdie != FDIERROR_NONE)
@@ -413,8 +425,27 @@ bool runFdi(const std::string &cabPath, FdiContext &c, std::string &err, CabResu
     dirBuf.push_back(0);
     c.cabFile = fsu::upper(dir + name);
 
+    // FDICopy обрабатывает файлы, перечисленные в одном томе (в следующий том
+    // он заходит только за продолжением разорванного файла), поэтому тома
+    // многотомного архива проходятся по очереди.
     g_fdi = &c;
-    BOOL ok = FDICopy(hfdi, nameBuf.data(), dirBuf.data(), 0, fdiNotify, nullptr, &c);
+    BOOL ok = TRUE;
+    for (int volume = 0; volume < 1000; ++volume)
+    {
+        c.cabInfoSeen = false;
+        c.nextName.clear();
+        ok = FDICopy(hfdi, nameBuf.data(), dirBuf.data(), 0, fdiNotify, nullptr, &c);
+        if (!ok || c.cancelled || !c.error.empty() || c.nextName.empty())
+            break;
+        std::string next = decodeName(c.nextName, 0);
+        if (!fsu::fileExists(dir + next))
+        {
+            c.error = "Не найден следующий том архива: " + next;
+            break;
+        }
+        nameBuf.assign(next.begin(), next.end());
+        nameBuf.push_back(0);
+    }
     g_fdi = nullptr;
     FDIDestroy(hfdi);
 
@@ -448,6 +479,11 @@ struct FciContext
     bool cancelled = false;
     bool utfName = false;
     std::string error;
+    // Многотомный архив: тома <volStem>2.cab, <volStem>3.cab... в volDir.
+    std::string volStem;
+    std::string volDir;
+    ULONG volSize = 0;
+    std::vector<std::string> volumes;   // созданные тома, кроме первого
 };
 
 FNFCIALLOC(fciAlloc) { return malloc(cb); }
@@ -518,7 +554,21 @@ FNFCIGETTEMPFILE(fciTempFile)
 FNFCIFILEPLACED(fciFilePlaced) { return 0; }
 
 // Размер тома не ограничен, поэтому переход на следующий том — ошибка.
-FNFCIGETNEXTCABINET(fciNextCabinet) { return FALSE; }
+// Следующий том многотомного архива. Без ограничения размера тома переход
+// на следующий том — ошибка.
+FNFCIGETNEXTCABINET(fciNextCabinet)
+{
+    FciContext &c = *static_cast<FciContext *>(pv);
+    if (c.volStem.empty())
+        return FALSE;
+    std::string name = c.volStem + std::to_string(pccab->iCab) + ".cab";
+    if (name.size() >= CB_MAX_CABINET_NAME)
+        return FALSE;
+    memcpy(pccab->szCab, name.c_str(), name.size() + 1);
+    pccab->cb = c.volSize;
+    c.volumes.push_back(fsu::joinPath(c.volDir, name));
+    return TRUE;
+}
 
 FNFCISTATUS(fciStatus)
 {
@@ -606,7 +656,8 @@ std::vector<char> cstr(const std::string &s)
 
 // ---------------------------------------------------------------------------
 
-bool cabRead(const std::string &path, CabInfo &info, std::string &err)
+// Чтение заголовков одного тома.
+static bool cabReadVolume(const std::string &path, CabInfo &info, std::string &err)
 {
     info = CabInfo();
     info.path = path;
@@ -724,6 +775,51 @@ bool cabRead(const std::string &path, CabInfo &info, std::string &err)
     return true;
 }
 
+bool cabRead(const std::string &path, CabInfo &info, std::string &err)
+{
+    if (!cabReadVolume(path, info, err))
+        return false;
+    // Следующие тома многотомного архива лежат рядом. Файл, начатый в
+    // предыдущем томе, уже учтён и повторно не добавляется.
+    const uint16_t kContinuedFromPrev = 0xFFFD, kContinuedPrevAndNext = 0xFFFF;
+    std::string current = path;
+    bool hasNext = info.hasNext;
+    std::string nextName = info.nextCab;
+    uint32_t index = (uint32_t) info.entries.size();
+    while (hasNext && info.volumes < 1000)
+    {
+        std::string next = fsu::joinPath(fsu::dirName(current), nextName);
+        CabInfo vol;
+        std::string volErr;
+        if (!fsu::fileExists(next) || !cabReadVolume(next, vol, volErr))
+        {
+            info.missingVolume = nextName;
+            break;
+        }
+        for (CabEntry &e : vol.entries)
+        {
+            if (e.folder == kContinuedFromPrev || e.folder == kContinuedPrevAndNext)
+                continue;
+            e.index = index++;
+            info.totalSize += e.size;
+            info.entries.push_back(std::move(e));
+        }
+        info.fileSize += vol.fileSize;
+        info.folders = uint16_t(info.folders + vol.folders);
+        ++info.volumes;
+        current = next;
+        hasNext = vol.hasNext;
+        nextName = vol.nextCab;
+    }
+    return true;
+}
+
+std::string cabVolumeName(const std::string &firstVolume, int n)
+{
+    return fsu::joinPath(fsu::dirName(firstVolume),
+                         fsu::stripExt(fsu::baseName(firstVolume)) + std::to_string(n) + ".cab");
+}
+
 bool cabHasSignature(const std::string &path, bool sfx)
 {
     FILE *f = _wfopen(fsu::widen(path).c_str(), L"rb");
@@ -789,7 +885,7 @@ bool cabTest(const std::string &cabPath, CabProgress *progress, std::string &err
 
 bool cabCreate(const std::string &cabPath, const std::vector<CabSource> &filesIn,
                CompressionSpec comp, CabProgress *progress, std::string &err,
-               const std::string &prefix)
+               const std::string &prefix, uint64_t volumeSize)
 {
     // Одинаковые имена в архиве не допускаются: последний источник заменяет предыдущий.
     std::vector<CabSource> files;
@@ -836,7 +932,10 @@ bool cabCreate(const std::string &cabPath, const std::vector<CabSource> &filesIn
     }
 
     // Архив пишется во временный файл рядом с целевым и подменяет его только при успехе.
-    std::string tmpPath = cabPath + ".tmp~";
+    // Имя первого тома записывается в заголовки следующих, поэтому первый том
+    // многотомного архива (не самораспаковывающегося) сразу пишется под своим именем.
+    bool multi = volumeSize > 0;
+    std::string tmpPath = multi && prefix.empty() ? cabPath : cabPath + ".tmp~";
     std::string dir = fsu::withSlash(fsu::dirName(tmpPath));
     std::string name = fsu::baseName(tmpPath);
     if (dir.size() >= CB_MAX_CAB_PATH || name.size() >= CB_MAX_CABINET_NAME)
@@ -845,9 +944,23 @@ bool cabCreate(const std::string &cabPath, const std::vector<CabSource> &filesIn
         return false;
     }
 
+    // Размер тома ограничен форматом (2 Гб). Первый том самораспаковывающегося
+    // архива уменьшается на размер распаковщика, чтобы файл EXE уложился в том.
+    const uint64_t kMaxVolume = 0x7FFFFFFF;
+    uint64_t firstVolume = std::min(volumeSize, kMaxVolume);
+    if (multi && !prefix.empty())
+        firstVolume = firstVolume > prefix.size() + kMinVolumeSize ? firstVolume - prefix.size()
+                                                                  : kMinVolumeSize;
+    if (multi)
+    {
+        c.volStem = fsu::stripExt(fsu::baseName(cabPath));
+        c.volDir = fsu::dirName(cabPath);
+        c.volSize = (ULONG) std::min(volumeSize, kMaxVolume);
+    }
+
     CCAB ccab;
     memset(&ccab, 0, sizeof(ccab));
-    ccab.cb = 0x7FFFFFFF;
+    ccab.cb = multi ? (ULONG) firstVolume : 0x7FFFFFFF;
     ccab.cbFolderThresh = 0x7FFFFFFF;
     ccab.iCab = 1;
     ccab.setID = (USHORT) (GetTickCount() & 0xFFFF);
@@ -898,8 +1011,12 @@ bool cabCreate(const std::string &cabPath, const std::vector<CabSource> &filesIn
             : !c.error.empty() ? c.error
             : fciErrorText(erf);
         fsu::removeFile(tmpPath);
+        for (const std::string &v : c.volumes)
+            fsu::removeFile(v);
         return false;
     }
+    if (tmpPath == cabPath)
+        return true;
     if (!prefix.empty())
     {
         // Самораспаковывающийся архив: программа-распаковщик, за ней CAB.
@@ -917,6 +1034,8 @@ bool cabCreate(const std::string &cabPath, const std::vector<CabSource> &filesIn
         {
             err = "Не удалось записать архив " + cabPath + "\n" + fsu::lastErrorText();
             fsu::removeFile(sfxPath);
+            for (const std::string &v : c.volumes)
+                fsu::removeFile(v);
             return false;
         }
         tmpPath = sfxPath;

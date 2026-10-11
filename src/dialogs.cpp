@@ -20,6 +20,9 @@
 #define Uses_TProgram
 #define Uses_TDeskTop
 #define Uses_TScreen
+#define Uses_TMenu
+#define Uses_TMenuItem
+#define Uses_TMenuBox
 #define Uses_MsgBox
 #include <tvision/tv.h>
 
@@ -30,6 +33,7 @@
 
 #include "commands.h"
 #include "dialogs.h"
+#include "format.h"
 #include "fsutil.h"
 
 namespace {
@@ -163,7 +167,133 @@ private:
     std::string text;
 };
 
+// Выпадающий список (в Turbo Vision его нет): значение и стрелка ▼.
+// Список открывается стрелкой вниз, F4, пробелом или щелчком мыши.
+class TComboBox : public TView
+{
+public:
+    TComboBox(const TRect &bounds, std::vector<std::string> items, int value) :
+        TView(bounds),
+        items(std::move(items)),
+        value(value)
+    {
+        options |= ofSelectable | ofFirstClick;
+        eventMask |= evMouseDown;
+    }
+
+    int current() const { return value; }
+
+    void draw() override
+    {
+        TColorAttr c = getColor((state & sfFocused) ? 2 : 1);
+        TDrawBuffer b;
+        b.moveChar(0, ' ', c, size.x);
+        if (value >= 0 && value < (int) items.size())
+            b.moveStr(1, items[value], c, size.x - 3);
+        b.moveStr(size.x - 2, "▼", getColor(4));
+        writeLine(0, 0, size.x, 1, b);
+    }
+
+    TPalette &getPalette() const override
+    {
+        // Цвета строки ввода диалога.
+        static TPalette palette("\x13\x13\x14\x15", 4);
+        return palette;
+    }
+
+    void handleEvent(TEvent &ev) override
+    {
+        TView::handleEvent(ev);
+        bool open = ev.what == evMouseDown;
+        if (ev.what == evKeyDown && (state & sfFocused))
+        {
+            ushort k = ev.keyDown.keyCode;
+            open = k == kbDown || k == kbAltDown || k == kbF4 || ev.keyDown.charScan.charCode == ' ';
+        }
+        if (!open)
+            return;
+        clearEvent(ev);
+        popup();
+    }
+
+private:
+    static const ushort kCmdBase = 1000;   // команды ≥ 256 всегда разрешены
+
+    void popup()
+    {
+        TMenuItem *first = nullptr, *last = nullptr, *current = nullptr;
+        for (size_t i = 0; i < items.size(); ++i)
+        {
+            TMenuItem *item = new TMenuItem(items[i].c_str(), ushort(kCmdBase + i), kbNoKey);
+            if (!first)
+                first = item;
+            else
+                last->next = item;
+            last = item;
+            if ((int) i == value)
+                current = item;
+        }
+        if (!first)
+            return;
+        TMenu *menu = new TMenu(*first, current ? *current : *first);
+        TPoint p = TProgram::deskTop->makeLocal(makeGlobal(TPoint{0, 1}));
+        TRect r(p.x, p.y, TProgram::deskTop->size.x, TProgram::deskTop->size.y);
+        TMenuBox *box = new TMenuBox(r, menu, nullptr);
+        ushort cmd = TProgram::deskTop->execView(box);
+        TObject::destroy(box);
+        delete menu;
+        if (cmd >= kCmdBase && cmd < kCmdBase + items.size())
+        {
+            value = cmd - kCmdBase;
+            drawView();
+        }
+    }
+
+    std::vector<std::string> items;
+    int value;
+};
+
 namespace {
+
+// Идентификатор списка истории размеров тома и его начальные значения.
+const ushort hlVolume = 13;
+
+void addVolumePresets()
+{
+    static bool done = false;
+    if (done)
+        return;
+    done = true;
+    for (const char *s : {"2 Гб", "1 Гб", "700 Мб", "650 Мб", "100 Мб", "1,44 Мб", "Не делить"})
+        historyAdd(hlVolume, s);
+}
+
+// Поле «Размер тома» со списком готовых значений.
+TInputLine *insertVolumeField(TGroup *g, int x, int y, const char *label)
+{
+    addVolumePresets();
+    TInputLine *input = new TInputLine(TRect(x + 1, y + 1, x + 22, y + 2), 40);
+    g->insert(input);
+    g->insert(new THistory(TRect(x + 22, y + 1, x + 25, y + 2), input, hlVolume));
+    g->insert(new TLabel(TRect(x, y, x + 24, y + 1), label, input));
+    return input;
+}
+
+// Проверка поля «Размер тома»; при ошибке — сообщение.
+bool readVolumeField(TInputLine *input, uint64_t &size)
+{
+    if (!parseSize(input->data, size))
+    {
+        showError("Размер тома указан неверно. Примеры: 100 Мб, 700 Мб, 1,44 Мб, 2 Гб, «Не делить».");
+        return false;
+    }
+    if (size && size < kMinVolumeSize)
+    {
+        showError("Размер тома должен быть не меньше " + formatSize(kMinVolumeSize) + ".");
+        return false;
+    }
+    return true;
+}
 
 // Окно сообщения, размер которого рассчитан по тексту (длинные пути).
 ushort messageBoxFit(const std::string &msg, ushort options)
@@ -769,7 +899,8 @@ private:
     std::vector<std::string> items;
     TStringListView *list;
     TCheckBoxes *flagsBox;
-    TRadioButtons *method;
+    TComboBox *level;
+    TInputLine *volume = nullptr;
     TInputLine *prefix;
     TCheckBoxes *sfx = nullptr;
 };
@@ -800,23 +931,21 @@ TAddDialog::TAddDialog(const char *title, AddOptions &opt) :
     insert(new TLabel(TRect(2, 11, 20, 12), "~П~араметры:", flagsBox));
     setClusterValue(flagsBox, (opt.recurse ? 1 : 0) | (opt.keepPaths ? 2 : 0));
 
-    method = new TRadioButtons(TRect(40, 12, 67, 15),
-        new TSItem("Без сжатия",
-        new TSItem("MSZIP",
-        new TSItem("LZX (максимальное)", nullptr))));
-    insert(method);
-    insert(new TLabel(TRect(39, 11, 50, 12), "Сжати~е~:", method));
-    setClusterValue(method, (ushort) opt.compression.type);
+    level = new TComboBox(TRect(40, 12, 67, 13), compressionLevels(), compressionLevel(opt.compression));
+    insert(level);
+    insert(new TLabel(TRect(39, 11, 60, 12), "Сжати~е~:", level));
 
     prefix = new TInputLine(TRect(3, 16, 67, 17), 200);
     insert(prefix);
     insert(new TLabel(TRect(2, 15, 30, 16), "Путь внутри ~а~рхива:", prefix));
     setInputText(prefix, opt.prefix);
 
-    // Выбор доступен только при создании нового архива.
+    // Тома и самораспаковывающийся архив — только при создании нового архива.
     int y = 18;
     if (opt.allowSfx)
     {
+        volume = insertVolumeField(this, 39, 13, "Размер ~т~ома:");
+        setInputText(volume, opt.volumeSize ? formatSize(opt.volumeSize) : "Не делить");
         sfx = new TCheckBoxes(TRect(3, 18, 67, 19),
             new TSItem("Создать самораспаковывающийся архив (EXE)", nullptr));
         insert(sfx);
@@ -899,8 +1028,11 @@ Boolean TAddDialog::valid(ushort command)
         opt.recurse = (f & 1) != 0;
         opt.keepPaths = (f & 2) != 0;
         opt.prefix = prefix->data;
-        opt.compression.type = (CabCompression) clusterValue(method);
+        opt.compression = compressionOfLevel(level->current());
         opt.sfx = sfx && (clusterValue(sfx) & 1) != 0;
+        opt.volumeSize = 0;
+        if (volume && !readVolumeField(volume, opt.volumeSize))
+            return False;
     }
     return TDialog::valid(command);
 }
@@ -1057,20 +1189,20 @@ bool settingsDialog(Settings &s)
 {
     TDialog *d = new TDialog(TRect(0, 0, 52, 15), "Параметры");
     d->options |= ofCentered;
-    TCheckBoxes *general = new TCheckBoxes(TRect(3, 3, 49, 5),
+    TCheckBoxes *general = new TCheckBoxes(TRect(3, 3, 49, 7),
         new TSItem("Ассоциировать файлы CAB с Cabine",
-        new TSItem("Показывать архивы первыми", nullptr)));
+        new TSItem("Ассоциировать файлы ZIP с Cabine",
+        new TSItem("Ассоциировать файлы RAR с Cabine",
+        new TSItem("Показывать архивы первыми", nullptr)))));
     d->insert(general);
     d->insert(new TLabel(TRect(2, 2, 30, 3), "~О~бщие:", general));
-    setClusterValue(general, (s.associate ? 1 : 0) | (s.archivesFirst ? 2 : 0));
+    setClusterValue(general, (s.associateCab ? 1 : 0) | (s.associateZip ? 2 : 0) |
+                             (s.associateRar ? 4 : 0) | (s.archivesFirst ? 8 : 0));
 
-    TRadioButtons *method = new TRadioButtons(TRect(3, 7, 49, 10),
-        new TSItem("Без сжатия",
-        new TSItem("MSZIP (быстрое)",
-        new TSItem("LZX (максимальное)", nullptr))));
-    d->insert(method);
-    d->insert(new TLabel(TRect(2, 6, 40, 7), "~С~жатие новых архивов:", method));
-    setClusterValue(method, (ushort) s.compression.type);
+    TComboBox *level = new TComboBox(TRect(3, 9, 30, 10), compressionLevels(),
+                                     compressionLevel(s.compression));
+    d->insert(level);
+    d->insert(new TLabel(TRect(2, 8, 40, 9), "~С~жатие новых архивов:", level));
 
     d->insert(new TButton(TRect(13, 12, 25, 14), "O~K~", cmOK, bfDefault));
     d->insert(new TButton(TRect(27, 12, 39, 14), "Отмена", cmCancel, bfNormal));
@@ -1079,9 +1211,11 @@ bool settingsDialog(Settings &s)
     if (r == cmOK)
     {
         ushort g = clusterValue(general);
-        s.associate = (g & 1) != 0;
-        s.archivesFirst = (g & 2) != 0;
-        s.compression.type = (CabCompression) clusterValue(method);
+        s.associateCab = (g & 1) != 0;
+        s.associateZip = (g & 2) != 0;
+        s.associateRar = (g & 4) != 0;
+        s.archivesFirst = (g & 8) != 0;
+        s.compression = compressionOfLevel(level->current());
     }
     TObject::destroy(d);
     return r == cmOK;
@@ -1134,10 +1268,12 @@ namespace {
 class TPathDialog : public TDialog
 {
 public:
+    // height > 9 — под строкой пути остаётся место для других полей;
+    // кнопки OK и «Отмена» тогда добавляет наследник (addButtons).
     TPathDialog(const char *title, const char *label, PathKind kind, const char *wildcard,
-                const std::string &value) :
+                const std::string &value, int height = 9) :
         TWindowInit(&TDialog::initFrame),
-        TDialog(TRect(0, 0, 72, 9), title),
+        TDialog(TRect(0, 0, 72, height), title),
         kind(kind),
         wildcard(wildcard ? wildcard : "*.*")
     {
@@ -1146,9 +1282,16 @@ public:
         insert(input);
         insert(new TLabel(TRect(2, 2, 54, 3), label, input));
         insert(new TButton(TRect(57, 2, 69, 4), "~О~бзор...", cmBrowseDir, bfNormal));
-        insert(new TButton(TRect(23, 6, 35, 8), "O~K~", cmOK, bfDefault));
-        insert(new TButton(TRect(37, 6, 49, 8), "Отмена", cmCancel, bfNormal));
         setInputText(input, value);
+        if (height == 9)
+            addButtons();
+    }
+
+    void addButtons()
+    {
+        int y = size.y - 3;
+        insert(new TButton(TRect(23, y, 35, y + 2), "O~K~", cmOK, bfDefault));
+        insert(new TButton(TRect(37, y, 49, y + 2), "Отмена", cmCancel, bfNormal));
         selectNext(False);
     }
 
@@ -1193,7 +1336,58 @@ private:
     std::string wildcard;
 };
 
+// Окно «Добавить в архив»: путь архива, степень сжатия, размер тома, SFX.
+class TArchiveDialog : public TPathDialog
+{
+public:
+    TArchiveDialog(const char *title, ArchiveTarget &t) :
+        TWindowInit(&TDialog::initFrame),
+        TPathDialog(title, "~А~рхив:", PathKind::File, "*.cab", t.path, 13),
+        t(t)
+    {
+        level = new TComboBox(TRect(3, 6, 30, 7), compressionLevels(), compressionLevel(t.compression));
+        insert(level);
+        insert(new TLabel(TRect(2, 5, 28, 6), "Сжати~е~:", level));
+        volume = insertVolumeField(this, 35, 5, "Размер ~т~ома:");
+        setInputText(volume, t.volumeSize ? formatSize(t.volumeSize) : "Не делить");
+        sfx = new TCheckBoxes(TRect(3, 8, 69, 9),
+            new TSItem("Создать самораспаковывающийся архив (EXE)", nullptr));
+        insert(sfx);
+        setClusterValue(sfx, t.sfx ? 1 : 0);
+        addButtons();
+    }
+
+    Boolean valid(ushort command) override
+    {
+        if (command == cmOK)
+        {
+            t.path = input->data;
+            if (t.path.empty())
+                return False;
+            t.compression = compressionOfLevel(level->current());
+            t.sfx = (clusterValue(sfx) & 1) != 0;
+            if (!readVolumeField(volume, t.volumeSize))
+                return False;
+        }
+        return TDialog::valid(command);
+    }
+
+private:
+    ArchiveTarget &t;
+    TComboBox *level;
+    TInputLine *volume;
+    TCheckBoxes *sfx;
+};
+
 } // namespace
+
+bool archiveTargetDialog(const char *title, ArchiveTarget &t)
+{
+    TArchiveDialog *d = new TArchiveDialog(title, t);
+    bool ok = TProgram::deskTop->execView(d) == cmOK;
+    TObject::destroy(d);
+    return ok;
+}
 
 bool askPath(const char *title, const char *label, PathKind kind, const char *wildcard,
              std::string &value)
@@ -1298,14 +1492,65 @@ std::string &lastDirectory()
     return dir;
 }
 
+namespace {
+
+// Степени сжатия: метод CAB и окно LZX.
+struct Level
+{
+    const char *title;
+    const char *key;        // значение в cabine.ini
+    CabCompression type;
+    int window;
+};
+
+const Level kLevels[] = {
+    {"Без сжатия",            "none",  CabCompression::None,  0},
+    {"Быстрое (MSZIP)",       "mszip", CabCompression::MSZIP, 0},
+    {"Обычное (LZX:15)",      "lzx15", CabCompression::LZX,   15},
+    {"Хорошее (LZX:18)",      "lzx18", CabCompression::LZX,   18},
+    {"Максимальное (LZX:21)", "lzx21", CabCompression::LZX,   21},
+};
+const int kLevelCount = sizeof(kLevels) / sizeof(kLevels[0]);
+
+} // namespace
+
+std::vector<std::string> compressionLevels()
+{
+    std::vector<std::string> titles;
+    for (const Level &l : kLevels)
+        titles.push_back(l.title);
+    return titles;
+}
+
+int compressionLevel(const CompressionSpec &spec)
+{
+    if (spec.type == CabCompression::None)
+        return 0;
+    if (spec.type == CabCompression::MSZIP)
+        return 1;
+    // Окно LZX между уровнями относится к ближайшему меньшему.
+    int level = 2;
+    for (int i = 2; i < kLevelCount; ++i)
+        if (spec.lzxWindow >= kLevels[i].window)
+            level = i;
+    return level;
+}
+
+CompressionSpec compressionOfLevel(int level)
+{
+    const Level &l = kLevels[std::max(0, std::min(level, kLevelCount - 1))];
+    CompressionSpec spec;
+    spec.type = l.type;
+    if (l.window)
+        spec.lzxWindow = l.window;
+    return spec;
+}
+
 std::string compressionName(const CompressionSpec &spec)
 {
-    switch (spec.type)
-    {
-        case CabCompression::None:  return "none";
-        case CabCompression::MSZIP: return "mszip";
-        default:                    return "lzx";
-    }
+    if (spec.type == CabCompression::LZX)
+        return "lzx" + std::to_string(spec.lzxWindow);
+    return kLevels[compressionLevel(spec)].key;
 }
 
 CompressionSpec compressionFromName(const std::string &name)
@@ -1313,7 +1558,14 @@ CompressionSpec compressionFromName(const std::string &name)
     CompressionSpec spec;
     if (name == "none")
         spec.type = CabCompression::None;
-    else if (name == "lzx")
+    else if (name == "mszip")
+        spec.type = CabCompression::MSZIP;
+    else
+    {
+        // "lzx" прежних версий — максимальное окно.
         spec.type = CabCompression::LZX;
+        int w = name.size() > 3 ? atoi(name.c_str() + 3) : 21;
+        spec.lzxWindow = w >= 15 && w <= 21 ? w : 21;
+    }
     return spec;
 }

@@ -1,5 +1,6 @@
 #include <windows.h>
 
+#include "cabfile.h"
 #include "dialogs.h"
 #include "fsutil.h"
 #include "sfx/sfxres.h"
@@ -50,4 +51,13 @@ bool prepareSfx(std::string &path, std::string &stub)
     }
     path = exe;
     return true;
+}
+
+bool confirmVolumes(const std::string &firstVolume, uint64_t volumeSize)
+{
+    std::string second = cabVolumeName(firstVolume, 2);
+    if (!volumeSize || !fsu::fileExists(second))
+        return true;
+    return confirm("Рядом уже есть тома с такими же именами (" + fsu::baseName(second) +
+                   " и следующие).\nОни будут заменены. Продолжить?");
 }

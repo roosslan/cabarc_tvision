@@ -157,6 +157,10 @@ std::string propertiesText(const CabInfo &i, const std::string &display)
         t += "\nПредыдущий том:   " + i.prevCab;
     if (i.hasNext)
         t += "\nСледующий том:    " + i.nextCab;
+    if (i.volumes > 1)
+        t += "\nПрочитано томов:  " + std::to_string(i.volumes) + " (размер и файлы — по всем)";
+    if (!i.missingVolume.empty())
+        t += "\nНе найден том:    " + i.missingVolume;
     return t;
 }
 
@@ -1280,6 +1284,8 @@ void TPanelWindow::addFiles()
     std::string stub;
     if (opt.sfx && !prepareSfx(archivePath, stub))
         return;
+    if (!exists && !confirmVolumes(archivePath, opt.volumeSize))
+        return;
     std::vector<CabSource> sources;
     if (!collectSources(opt, sources))
         return;
@@ -1311,10 +1317,11 @@ void TPanelWindow::addFiles()
         return;
 
     CompressionSpec comp = opt.compression;
+    uint64_t volume = opt.volumeSize;
     bool ok = runWithProgress(exists ? "Добавление в архив" : "Создание архива",
         [&](CabProgress *p, std::string &err) {
             return exists ? cabUpdate(archivePath, {}, sources, comp, p, err)
-                          : cabCreate(archivePath, sources, comp, p, err, stub);
+                          : cabCreate(archivePath, sources, comp, p, err, stub, volume);
         });
     if (archiveMode)
         refresh();

@@ -115,6 +115,17 @@ void testFormat()
           "pluralFiles: 11 файлов, 21 файл, 112 файлов");
     check(formatRatio(1, 4) == "25,0 %" && formatRatio(1, 0) == "—", "formatRatio");
     check(formatAttr(0x21) == "R--A", "formatAttr");
+
+    uint64_t v = 1;
+    check(parseSize("", v) && v == 0 && parseSize("Не делить", v) && v == 0, "parseSize: пусто и «Не делить» — 0");
+    check(parseSize("100 Мб", v) && v == 100ull << 20, "parseSize: 100 Мб");
+    check(parseSize("700мб", v) && v == 700ull << 20, "parseSize: 700мб без пробела");
+    check(parseSize("1,44 Мб", v) && v == 1457664, "parseSize: 1,44 Мб — дискета");
+    check(parseSize("2 ГБ", v) && v == 2ull << 30, "parseSize: 2 ГБ");
+    check(parseSize("512 kb", v) && v == 512ull << 10, "parseSize: 512 kb (латиница)");
+    check(parseSize("1.5 G", v) && v == 3ull << 29, "parseSize: 1.5 G");
+    check(parseSize("4096", v) && v == 4096, "parseSize: число без единиц — байты");
+    check(!parseSize("много", v) && !parseSize("10 ТБ", v), "parseSize: неверная запись отвергается");
 }
 
 void testFsutil(const std::string &src)
@@ -268,6 +279,78 @@ void testSfx(const std::string &root, const std::vector<CabSource> &sources, con
           !hasEntry(info, "src\\empty.dat"),
           "файл удалён из самораспаковывающегося архива");
     check(cabTest(exe, nullptr, err), "архив после пересборки проходит проверку");
+}
+
+void testVolumes(const std::string &root, const std::vector<CabSource> &sources, const std::string &big)
+{
+    section("Многотомный архив");
+    std::string dir = fsu::joinPath(root, "volumes");
+    fsu::makeDirs(dir);
+    std::string err;
+    CompressionSpec none;
+    none.type = CabCompression::None;
+    const uint64_t volume = 128 * 1024;
+
+    std::string cab = fsu::joinPath(dir, "набор.cab");
+    check(cabVolumeName(cab, 2) == fsu::joinPath(dir, "набор2.cab"), "имя второго тома: набор2.cab");
+    check(cabCreate(cab, sources, none, nullptr, err, std::string(), volume), "cabCreate по 128 Кб " + err);
+    int count = 1;
+    while (fsu::fileExists(cabVolumeName(cab, count + 1)))
+        ++count;
+    check(count >= 5, "создано томов: " + std::to_string(count));
+    bool sizesOk = fsu::fileSize(cab) <= volume;
+    for (int n = 2; n <= count; ++n)
+        sizesOk = sizesOk && fsu::fileSize(cabVolumeName(cab, n)) <= volume;
+    check(sizesOk, "каждый том не больше 128 Кб");
+    check(!fsu::fileExists(cab + ".tmp~"), "временных файлов не осталось");
+
+    CabInfo info;
+    check(cabRead(cab, info, err) && info.volumes == count && info.entries.size() == 5 &&
+          info.missingVolume.empty(),
+          "cabRead читает все тома: 5 файлов");
+    uint64_t total = 0;
+    for (const CabSource &s : sources)
+        total += fsu::fileSize(s.diskPath);
+    check(info.totalSize == total, "суммарный размер по всем томам без повторов");
+
+    CabResult res;
+    bool ok = cabTest(cab, nullptr, err, &res);
+    check(ok && res.files == 5, "cabTest по всем томам " + err);
+    std::string out = fsu::joinPath(dir, "out");
+    ok = cabExtract(cab, out, {}, true, Overwrite::Always, nullptr, err, &res);
+    check(ok && res.files == 5, "cabExtract по всем томам " + err);
+    checkExtracted(out, big, "многотомный");
+
+    // Нет последнего тома: список неполный, распаковка — с ошибкой.
+    std::string part = fsu::joinPath(dir, "part");
+    fsu::makeDirs(part);
+    for (int n = 1; n < count; ++n)
+    {
+        std::string from = n == 1 ? cab : cabVolumeName(cab, n);
+        CopyFileW(fsu::widen(from).c_str(), fsu::widen(fsu::joinPath(part, fsu::baseName(from))).c_str(), FALSE);
+    }
+    std::string partCab = fsu::joinPath(part, fsu::baseName(cab));
+    ok = cabRead(partCab, info, err);
+    check(ok && info.missingVolume == fsu::baseName(cabVolumeName(cab, count)),
+          "отсутствующий том назван: " + info.missingVolume);
+    bool extracted = cabExtract(partCab, fsu::joinPath(part, "out"), {}, true, Overwrite::Always, nullptr, err);
+    check(!extracted, "распаковка без последнего тома завершается ошибкой: " + err);
+
+    // Самораспаковывающийся первый том.
+    std::string stub = readFile(CABINE_SFX_STUB);
+    const uint64_t sfxVolume = stub.size() + 256 * 1024;
+    std::string exe = fsu::joinPath(dir, "setup.exe");
+    check(cabCreate(exe, sources, none, nullptr, err, stub, sfxVolume), "cabCreate SFX по томам " + err);
+    check(fsu::fileSize(exe) <= sfxVolume, "первый том вместе с распаковщиком укладывается в размер тома");
+    check(fsu::fileExists(fsu::joinPath(dir, "setup2.cab")), "второй том — setup2.cab");
+    ok = cabRead(exe, info, err);
+    check(ok && info.offset == stub.size() && info.volumes >= 2 && info.entries.size() == 5,
+          "SFX читается со всеми томами: томов " + std::to_string(info.volumes));
+    std::string sout = fsu::joinPath(dir, "sfx_out");
+    ok = cabExtract(exe, sout, {}, true, Overwrite::Always, nullptr, err, &res);
+    check(ok && res.files == 5, "распаковка SFX по всем томам " + err);
+    checkExtracted(sout, big, "SFX многотомный");
+    check(!cabUpdate(exe, {"src\\empty.dat"}, {}, none, nullptr, err), "изменение многотомного архива запрещено");
 }
 
 void testSystemExpand(const std::string &root)
@@ -604,6 +687,7 @@ int main()
     testExtractModes(root);
     testUpdate(root);
     testSfx(root, sources, big);
+    testVolumes(root, sources, big);
     testSystemExpand(root);
     setPasswordPrompt(scriptedPassword);
     testZip(root, big);
