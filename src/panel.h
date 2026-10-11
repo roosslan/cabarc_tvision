@@ -106,7 +106,9 @@ private:
     std::vector<std::string> entryNames(const std::vector<int> &indexes) const;
     std::string archiveName(const PanelItem &item) const;
     std::string focusedCab() const;
-    std::string extractToTemp(const std::string &entryName);
+    // Извлечение одного файла во временную директорию (без путей) либо, при
+    // allFiles, всего архива с путями. Возвращает путь к файлу entryName.
+    std::string extractToTemp(const std::string &entryName, bool allFiles = false);
     void marksChanged();
 
     void enterItem(int index);
