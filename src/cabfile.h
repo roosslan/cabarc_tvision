@@ -47,6 +47,10 @@ struct CabInfo
     std::string method;         // описание метода сжатия
     CompressionSpec compression;
     std::vector<CabEntry> entries;
+    // Многотомный архив читается от открытого тома до последнего: entries,
+    // totalSize, fileSize и folders относятся ко всем этим томам.
+    int volumes = 1;
+    std::string missingVolume;  // имя тома, который не найден рядом
 };
 
 enum class Overwrite { Ask, Always, Never };
@@ -98,11 +102,20 @@ bool cabExtract(const std::string &cabPath, const std::string &destDir,
 bool cabTest(const std::string &cabPath, CabProgress *progress, std::string &err,
              CabResult *result = nullptr);
 
+// Наименьший размер тома многотомного архива.
+const uint64_t kMinVolumeSize = 64 * 1024;
+
 // prefix — данные, записываемые перед архивом (программа-распаковщик
-// самораспаковывающегося архива).
+// самораспаковывающегося архива). volumeSize > 0 — многотомный архив:
+// первый том — cabPath, следующие — <имя>2.cab, <имя>3.cab... рядом с ним.
+// Первый том самораспаковывающегося архива вместе с распаковщиком
+// укладывается в volumeSize.
 bool cabCreate(const std::string &cabPath, const std::vector<CabSource> &files,
                CompressionSpec comp, CabProgress *progress, std::string &err,
-               const std::string &prefix = std::string());
+               const std::string &prefix = std::string(), uint64_t volumeSize = 0);
+
+// Имя n-го тома (n >= 2) многотомного архива с первым томом firstVolume.
+std::string cabVolumeName(const std::string &firstVolume, int n);
 
 // Пересборка архива: удаление файлов remove и добавление (замена) файлов add.
 // Программа-распаковщик самораспаковывающегося архива сохраняется.

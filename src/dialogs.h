@@ -56,9 +56,22 @@ struct AddOptions
     bool keepPaths = true;
     std::string prefix;
     CompressionSpec compression;
-    bool allowSfx = false;  // показывать выбор самораспаковывающегося архива
+    bool allowSfx = false;  // новый архив: показывать размер тома и выбор SFX
+    bool sfx = false;
+    uint64_t volumeSize = 0;    // 0 — один файл
+};
+
+// Новый архив или добавление в архив (окно «Добавить в архив ...»).
+struct ArchiveTarget
+{
+    std::string path;
+    CompressionSpec compression;
+    uint64_t volumeSize = 0;
     bool sfx = false;
 };
+
+// Окно с путём архива («Обзор...»), степенью сжатия, размером тома и SFX.
+bool archiveTargetDialog(const char *title, ArchiveTarget &t);
 
 struct ExtractOptions
 {
@@ -75,7 +88,9 @@ bool extractDialog(int selectedCount, int totalCount, ExtractOptions &opt);
 bool sfxDialog(const std::string &about, ExtractOptions &opt);
 struct Settings
 {
-    bool associate = false;         // файлы .cab открываются в Cabine
+    bool associateCab = false;      // файлы .cab, .zip, .rar открываются в Cabine
+    bool associateZip = false;
+    bool associateRar = false;
     bool archivesFirst = false;     // архивы в панели выше остальных файлов
     CompressionSpec compression;    // метод сжатия новых архивов
 };
@@ -102,6 +117,12 @@ ushort confirm3(const std::string &msg);   // cmYes, cmNo или cmCancel
 
 // Директория, с которой начинаются диалоги выбора файлов.
 std::string &lastDirectory();
+
+// Степени сжатия для выпадающего списка: названия, номер степени по методу
+// и метод по номеру (0 — без сжатия, последняя — максимальное).
+std::vector<std::string> compressionLevels();
+int compressionLevel(const CompressionSpec &spec);
+CompressionSpec compressionOfLevel(int level);
 
 std::string compressionName(const CompressionSpec &spec);
 CompressionSpec compressionFromName(const std::string &name);

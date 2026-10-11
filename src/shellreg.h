@@ -10,10 +10,11 @@
 bool registerShellMenu(const std::string &cabineExe, const std::string &shellExe, std::string &err);
 bool unregisterShellMenu(std::string &err);
 
-// Ассоциация файлов .cab с Cabine (двойной щелчок открывает архив в панели).
+// Ассоциация файлов архивов с Cabine (двойной щелчок открывает архив в панели).
+// ext — расширение без точки: "cab", "zip", "rar". ProgID — Cabine.<ext>.
 // Записывается в HKCU\Software\Classes; прежнее значение восстанавливается при отключении.
-bool isCabAssociated();
-bool setCabAssociation(bool enable, const std::string &cabineExe, std::string &err);
-// Выбор программы для .cab через «Открыть с помощью» (UserChoice) имеет приоритет
+bool isAssociated(const std::string &ext);
+bool setAssociation(const std::string &ext, bool enable, const std::string &cabineExe, std::string &err);
+// Выбор программы через «Открыть с помощью» (UserChoice) имеет приоритет
 // над ассоциацией и программно не меняется.
-bool cabUserChoiceOverrides();
+bool userChoiceOverrides(const std::string &ext);

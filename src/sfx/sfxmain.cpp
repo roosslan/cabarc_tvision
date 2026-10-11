@@ -68,14 +68,17 @@ int TSfxApp::work()
         showError("В файле не найден архив CAB\n" + self);
         return 1;
     }
-    if (info.hasPrev || info.hasNext)
+    // Многотомный архив: остальные тома (<имя>2.cab...) должны лежать рядом.
+    if (!info.missingVolume.empty())
     {
-        showError("Многотомные архивы не поддерживаются");
+        showError("Не найден том архива " + info.missingVolume + "\n\nВсе тома должны лежать "
+                  "в одной директории с " + fsu::baseName(self) + ".");
         return 1;
     }
 
-    std::string about = "Архив: " + fsu::baseName(self) + "\n" + pluralFiles(info.entries.size()) +
-                        ", " + formatSize(info.totalSize);
+    std::string about = "Архив: " + fsu::baseName(self) +
+                        (info.volumes > 1 ? " (томов: " + std::to_string(info.volumes) + ")" : std::string()) +
+                        "\n" + pluralFiles(info.entries.size()) + ", " + formatSize(info.totalSize);
     ExtractOptions opt;
     opt.dest = fsu::dirName(self);
     if (!sfxDialog(about, opt))

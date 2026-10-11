@@ -129,9 +129,18 @@ bool registerShellMenu(const std::string &cabineExe, const std::string &shellExe
 
 namespace {
 
-const wchar_t *const kProgId = L"Cabine.cab";
-const wchar_t *const kExtKey = L"Software\\Classes\\.cab";
 const wchar_t *const kPrevValue = L"Cabine.Previous";
+
+// ProgID и раздел расширения: Cabine.cab и Software\Classes\.cab и т. д.
+std::wstring progIdOf(const std::string &ext)
+{
+    return L"Cabine." + fsu::widen(ext);
+}
+
+std::wstring extKeyOf(const std::string &ext)
+{
+    return std::wstring(kRoot) + L"." + fsu::widen(ext);
+}
 
 bool readString(HKEY root, const std::wstring &path, const wchar_t *name, std::wstring &value)
 {
@@ -154,73 +163,80 @@ bool setKeyValue(const std::wstring &path, const wchar_t *name, const std::wstri
     return ok;
 }
 
+std::string upperExt(const std::string &ext)
+{
+    return fsu::upper(ext);
+}
+
 } // namespace
 
-bool isCabAssociated()
+bool isAssociated(const std::string &ext)
 {
     std::wstring value;
-    return readString(HKEY_CURRENT_USER, kExtKey, nullptr, value) && value == kProgId;
+    return readString(HKEY_CURRENT_USER, extKeyOf(ext), nullptr, value) && value == progIdOf(ext);
 }
 
-bool cabUserChoiceOverrides()
+bool userChoiceOverrides(const std::string &ext)
 {
     std::wstring value;
-    return readString(HKEY_CURRENT_USER,
-                      L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.cab\\UserChoice",
-                      L"ProgId", value) && value != kProgId;
+    std::wstring path = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\." +
+                        fsu::widen(ext) + L"\\UserChoice";
+    return readString(HKEY_CURRENT_USER, path, L"ProgId", value) && value != progIdOf(ext);
 }
 
-bool setCabAssociation(bool enable, const std::string &cabineExe, std::string &err)
+bool setAssociation(const std::string &ext, bool enable, const std::string &cabineExe, std::string &err)
 {
-    std::wstring progKey = std::wstring(kRoot) + kProgId;
+    std::wstring progId = progIdOf(ext);
+    std::wstring progKey = std::wstring(kRoot) + progId;
+    std::wstring extKey = extKeyOf(ext);
     if (enable)
     {
         std::wstring exe = quoted(cabineExe);
         std::wstring previous;
         bool ok =
-            setKeyValue(progKey, nullptr, L"CAB-архив") &&
+            setKeyValue(progKey, nullptr, fsu::widen(upperExt(ext)) + L"-архив") &&
             setKeyValue(progKey + L"\\DefaultIcon", nullptr, exe + L",-2") &&
             setKeyValue(progKey + L"\\shell", nullptr, L"open") &&
             setKeyValue(progKey + L"\\shell\\open", L"MUIVerb", L"Открыть в Cabine") &&
             setKeyValue(progKey + L"\\shell\\open\\command", nullptr, exe + L" \"%1\"");
         // Прежняя программа запоминается, чтобы вернуть её при отключении.
-        if (ok && readString(HKEY_CURRENT_USER, kExtKey, nullptr, previous) && previous != kProgId)
-            ok = setKeyValue(kExtKey, kPrevValue, previous);
-        ok = ok && setKeyValue(kExtKey, nullptr, kProgId) &&
-             setKeyValue(std::wstring(kExtKey) + L"\\OpenWithProgids", kProgId, L"");
+        if (ok && readString(HKEY_CURRENT_USER, extKey, nullptr, previous) && previous != progId)
+            ok = setKeyValue(extKey, kPrevValue, previous);
+        ok = ok && setKeyValue(extKey, nullptr, progId) &&
+             setKeyValue(extKey + L"\\OpenWithProgids", progId.c_str(), L"");
         if (!ok)
-            err = "Не удалось записать ассоциацию .cab в реестр (HKCU\\Software\\Classes)";
+            err = "Не удалось записать ассоциацию ." + ext + " в реестр (HKCU\\Software\\Classes)";
         SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
         return ok;
     }
 
-    HKEY ext;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, kExtKey, 0, KEY_READ | KEY_WRITE, &ext) == ERROR_SUCCESS)
+    HKEY key;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, extKey.c_str(), 0, KEY_READ | KEY_WRITE, &key) == ERROR_SUCCESS)
     {
         std::wstring current, previous;
-        if (readString(HKEY_CURRENT_USER, kExtKey, nullptr, current) && current == kProgId)
+        if (readString(HKEY_CURRENT_USER, extKey, nullptr, current) && current == progId)
         {
-            if (readString(HKEY_CURRENT_USER, kExtKey, kPrevValue, previous))
-                setValue(ext, nullptr, previous);
+            if (readString(HKEY_CURRENT_USER, extKey, kPrevValue, previous))
+                setValue(key, nullptr, previous);
             else
-                RegDeleteValueW(ext, nullptr);
+                RegDeleteValueW(key, nullptr);
         }
-        RegDeleteValueW(ext, kPrevValue);
+        RegDeleteValueW(key, kPrevValue);
         HKEY owp;
-        if (RegOpenKeyExW(ext, L"OpenWithProgids", 0, KEY_WRITE, &owp) == ERROR_SUCCESS)
+        if (RegOpenKeyExW(key, L"OpenWithProgids", 0, KEY_WRITE, &owp) == ERROR_SUCCESS)
         {
-            RegDeleteValueW(owp, kProgId);
+            RegDeleteValueW(owp, progId.c_str());
             RegCloseKey(owp);
         }
-        RegCloseKey(ext);
+        RegCloseKey(key);
     }
     LSTATUS r = RegDeleteTreeW(HKEY_CURRENT_USER, progKey.c_str());
     if (r == ERROR_SUCCESS)
         RegDeleteKeyW(HKEY_CURRENT_USER, progKey.c_str());
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
-    if (isCabAssociated())
+    if (isAssociated(ext))
     {
-        err = "Не удалось снять ассоциацию .cab в реестре (HKCU\\Software\\Classes)";
+        err = "Не удалось снять ассоциацию ." + ext + " в реестре (HKCU\\Software\\Classes)";
         return false;
     }
     return true;
