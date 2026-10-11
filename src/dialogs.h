@@ -87,6 +87,11 @@ bool chooseFile(const char *title, const char *wildcard, bool forSave, std::stri
 bool chooseDirectory(const std::string &start, std::string &dir);
 bool askMask(const char *title, std::string &mask);
 bool askText(const char *title, const char *label, std::string &value);
+// Окно ввода пути с кнопкой «Обзор...»: выбор файла (wildcard — маска списка)
+// или директории.
+enum class PathKind { File, Directory };
+bool askPath(const char *title, const char *label, PathKind kind, const char *wildcard,
+             std::string &value);
 // Пароль зашифрованного архива; retry — предыдущий пароль не подошёл.
 bool askPassword(const std::string &archive, bool retry, std::string &password);
 
