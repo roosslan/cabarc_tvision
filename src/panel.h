@@ -65,7 +65,14 @@ public:
     void saveState() const;
 
     bool inArchive() const { return archiveMode; }
-    bool readOnly() const { return !parents.empty(); }
+    // Изменять можно только CAB, открытый с диска (не вложенный).
+    bool readOnly() const { return !parents.empty() || info.format != ArchiveFormat::Cab; }
+    std::string readOnlyReason() const
+    {
+        return !parents.empty()
+            ? "Вложенный архив открыт только для чтения: изменения не попали бы в родительский архив."
+            : "Архивы ZIP и RAR открываются только для просмотра и распаковки.";
+    }
 
     std::vector<PanelItem> items;   // в порядке отображения
     std::vector<char> marked;       // пометки по индексам items

@@ -19,6 +19,7 @@
 #include <algorithm>
 
 #include "app.h"
+#include "archive.h"
 #include "commands.h"
 #include "dialogs.h"
 #include "fsutil.h"
@@ -53,6 +54,7 @@ TCabineApp::TCabineApp() :
     TProgInit(&TCabineApp::initStatusLine, &TCabineApp::initMenuBar, &TCabineApp::initDeskTop)
 {
     defaultCompression = compressionFromName(fsu::loadSetting("Compression", "mszip"));
+    setPasswordPrompt(askPassword);
 }
 
 TCabineApp::~TCabineApp()
@@ -250,7 +252,7 @@ void TCabineApp::newArchive()
 void TCabineApp::openArchiveDialog()
 {
     std::string path;
-    if (chooseFile("Открыть архив", "*.cab", false, path))
+    if (chooseFile("Открыть архив", "*.cab;*.zip;*.rar", false, path))
         openPath(path);
 }
 
@@ -311,7 +313,7 @@ void TCabineApp::runBatch()
     if (batch == BatchMode::Add)
         batchAdd();
     else
-        batchExtract();
+        batchExtract(batch == BatchMode::ExtractToDir);
     batchPaths.clear();
     TEvent e;
     e.what = evCommand;
@@ -391,8 +393,9 @@ void TCabineApp::batchAdd()
         }, kBatchHoldMs);
 }
 
-// -x: каждый архив распаковывается в директорию, где он лежит.
-void TCabineApp::batchExtract()
+// -x: каждый архив распаковывается в директорию, где он лежит;
+// -e: в поддиректорию с именем архива (без расширения).
+void TCabineApp::batchExtract(bool toOwnDir)
 {
     std::vector<std::string> cabs;
     std::string missing;
@@ -412,8 +415,11 @@ void TCabineApp::batchExtract()
         for (const std::string &cab : cabs)
         {
             p->onStage("Извлечение " + fsu::baseName(cab));
+            std::string dest = fsu::dirName(cab);
+            if (toOwnDir)
+                dest = fsu::joinPath(dest, fsu::stripExt(fsu::baseName(cab)));
             std::string e;
-            if (!cabExtract(cab, fsu::dirName(cab), {}, true, Overwrite::Ask, p, e))
+            if (!archExtract(cab, dest, {}, true, Overwrite::Ask, p, e))
             {
                 if (e == kCabCancelled)
                 {

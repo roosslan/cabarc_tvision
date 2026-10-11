@@ -1,3 +1,12 @@
 [submodule "tvision"]
 	path = tvision
 	url = https://github.com/magiblot/tvision
+[submodule "third_party/zlib"]
+	path = third_party/zlib
+	url = https://github.com/madler/zlib.git
+[submodule "third_party/minizip-ng"]
+	path = third_party/minizip-ng
+	url = https://github.com/zlib-ng/minizip-ng.git
+[submodule "third_party/unrar"]
+	path = third_party/unrar
+	url = https://github.com/aawc/unrar.git

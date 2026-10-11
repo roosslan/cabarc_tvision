@@ -3,7 +3,7 @@
 #include <winver.h>
 #include "../version.h"
 
-1 ICON "../../TURBO.ICO"
+1 ICON "../../archive.ico"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION     CABINE_VERSION_MAJOR, CABINE_VERSION_MINOR, 0, 0

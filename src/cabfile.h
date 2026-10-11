@@ -15,10 +15,13 @@ struct CompressionSpec
     int lzxWindow = 21;     // 15..21
 };
 
+// Формат архива. Структуры CabInfo и CabEntry описывают архив любого формата.
+enum class ArchiveFormat { Unknown, Cab, Zip, Rar };
+
 struct CabEntry
 {
     std::string name;       // полное имя в архиве, разделитель '\'
-    uint32_t size = 0;
+    uint64_t size = 0;
     uint16_t date = 0;      // формат MS-DOS
     uint16_t time = 0;
     uint16_t attribs = 0;
@@ -29,6 +32,7 @@ struct CabEntry
 struct CabInfo
 {
     std::string path;
+    ArchiveFormat format = ArchiveFormat::Cab;
     // Смещение архива в файле. У самораспаковывающегося архива CAB
     // записан после программы-распаковщика, иначе смещение нулевое.
     uint64_t offset = 0;

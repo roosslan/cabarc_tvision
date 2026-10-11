@@ -14,7 +14,8 @@ class TStatusLine;
 class TPanelWindow;
 
 // Пакетный режим командной строки: действие выполняется, и программа завершается.
-enum class BatchMode { None, Add, Extract };
+// Extract — в директорию архива, ExtractToDir — в поддиректорию с именем архива.
+enum class BatchMode { None, Add, Extract, ExtractToDir };
 
 class TCabineApp : public TApplication
 {
@@ -45,7 +46,7 @@ private:
     void start();
     void runBatch();
     void batchAdd();
-    void batchExtract();
+    void batchExtract(bool toOwnDir);
     void newArchive();
     void openArchiveDialog();
     void options();
@@ -56,7 +57,7 @@ private:
     bool panelCommands = true;
     BatchMode batch = BatchMode::None;
     std::vector<std::string> pending;       // пути для открытия в панели
-    std::vector<std::string> batchPaths;    // пути пакетного режима (-a, -x)
+    std::vector<std::string> batchPaths;    // пути пакетного режима (-a, -x, -e)
     std::string tempRoot;
     unsigned tempCounter = 0;
 };

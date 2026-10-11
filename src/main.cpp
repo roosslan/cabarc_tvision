@@ -13,7 +13,8 @@ const char *const kUsage =
     "cabine.exe <директория | архив>   панель в указанном месте\n"
     "cabine.exe -a <путь> [<путь>...]  добавить файлы и директории в архив <имя>.cab\n"
     "                                  рядом с ними (с сохранением структуры)\n"
-    "cabine.exe -x <архив> [...]       распаковать архив в его же директорию\n"
+    "cabine.exe -x <архив> [...]       распаковать архив (CAB, ZIP, RAR) в его же директорию\n"
+    "cabine.exe -e <архив> [...]       распаковать архив в поддиректорию с его именем\n"
     "cabine.exe --register             добавить пункты в контекстное меню Проводника\n"
     "cabine.exe --unregister           убрать пункты из контекстного меню Проводника\n"
     "\n"
@@ -83,9 +84,11 @@ int main()
         }
         if (opt == "--register" || opt == "--unregister")
             return shellMenu(opt == "--register");
-        if (opt == "-a" || opt == "-x")
+        if (opt == "-a" || opt == "-x" || opt == "-e")
         {
-            batch = opt == "-a" ? BatchMode::Add : BatchMode::Extract;
+            batch = opt == "-a" ? BatchMode::Add
+                  : opt == "-x" ? BatchMode::Extract
+                                : BatchMode::ExtractToDir;
             for (size_t i = 1; i < args.size(); ++i)
                 expandList(args[i], paths);
             if (paths.empty())
