@@ -44,6 +44,12 @@ const TColorAttr cInfo = 0x70;
 const int kMaxRows = 32767;     // TListViewer нумерует строки типом short
 const uint64_t kMaxViewSize = 16 * 1024 * 1024;
 
+bool isProgram(const std::string &name)
+{
+    std::string ext = fsu::upper(fsu::extension(name));
+    return ext == "EXE" || ext == "COM" || ext == "BAT" || ext == "CMD" || ext == "MSI";
+}
+
 bool isCab(const std::string &name)
 {
     return hasArchiveExtension(name);
@@ -918,7 +924,10 @@ void TPanelWindow::enterItem(int index)
     std::string file;
     if (archiveMode)
     {
-        file = extractToTemp(info.entries[it.entry].name);
+        // Программе из архива могут понадобиться соседние файлы (DLL, данные,
+        // внешние CAB установщика): архив извлекается целиком, с путями, и
+        // программа запускается из своей директории.
+        file = extractToTemp(info.entries[it.entry].name, isProgram(it.name));
         if (file.empty())
             return;
         if (isArchive(file))
@@ -1058,7 +1067,7 @@ void TPanelWindow::markByMask(bool mark)
 
 // --------------------------------------------------------------- действия
 
-std::string TPanelWindow::extractToTemp(const std::string &entryName)
+std::string TPanelWindow::extractToTemp(const std::string &entryName, bool allFiles)
 {
     std::string dir = cabApp().newTempDir();
     if (dir.empty())
@@ -1068,10 +1077,14 @@ std::string TPanelWindow::extractToTemp(const std::string &entryName)
     }
     std::string path = info.path;
     bool ok = runWithProgress("Распаковка", [&](CabProgress *p, std::string &err) {
-        p->onStage("Распаковка во временную директорию");
-        return archExtract(path, dir, {entryName}, false, Overwrite::Always, p, err);
+        p->onStage(allFiles ? "Распаковка архива во временную директорию"
+                            : "Распаковка во временную директорию");
+        std::vector<std::string> names;
+        if (!allFiles)
+            names.push_back(entryName);
+        return archExtract(path, dir, names, allFiles, Overwrite::Always, p, err);
     });
-    return ok ? cabTargetPath(dir, entryName, false) : std::string();
+    return ok ? cabTargetPath(dir, entryName, allFiles) : std::string();
 }
 
 void TPanelWindow::viewFile()
