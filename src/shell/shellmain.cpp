@@ -9,6 +9,8 @@
 // cabine-shell.exe -a <путь>   добавить в архив
 // cabine-shell.exe -x <путь>   распаковать архив
 // cabine-shell.exe -e <путь>   распаковать архив в поддиректорию с его именем
+// cabine-shell.exe -ai <путь>  добавить в архив, имя которого задаётся в окне
+// cabine-shell.exe -ei <путь>  распаковать архив в директорию, заданную в окне
 
 #include <windows.h>
 
@@ -31,7 +33,11 @@ std::wstring channelName(const std::string &mode)
 {
     DWORD session = 0;
     ProcessIdToSessionId(GetCurrentProcessId(), &session);
-    const wchar_t *kind = mode == "-a" ? L".Add." : mode == "-x" ? L".Extract." : L".ExtractDir.";
+    const wchar_t *kind = mode == "-a"  ? L".Add."
+                        : mode == "-ai" ? L".AddAsk."
+                        : mode == "-x"  ? L".Extract."
+                        : mode == "-e"  ? L".ExtractDir."
+                                        : L".ExtractAsk.";
     return std::wstring(L"Cabine.Shell") + kind +
            std::to_wstring(session);
 }
@@ -181,13 +187,16 @@ bool launchCabine(const std::string &mode, const std::vector<std::string> &paths
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 {
     std::vector<std::string> args = fsu::commandLineArgs();
-    if (args.size() < 2 || (args[0] != "-a" && args[0] != "-x" && args[0] != "-e"))
+    if (args.size() < 2 || (args[0] != "-a" && args[0] != "-ai" && args[0] != "-x" &&
+                            args[0] != "-e" && args[0] != "-ei"))
     {
         MessageBoxW(nullptr,
                     L"cabine-shell.exe вызывается из контекстного меню Проводника:\n"
                     L"cabine-shell.exe -a <путь>  — добавить в CAB-архив\n"
                     L"cabine-shell.exe -x <путь>  — распаковать архив\n"
-                    L"cabine-shell.exe -e <путь>  — распаковать архив в поддиректорию",
+                    L"cabine-shell.exe -e <путь>  — распаковать архив в поддиректорию\n"
+                    L"cabine-shell.exe -ai <путь> — добавить в архив (имя задаётся в окне)\n"
+                    L"cabine-shell.exe -ei <путь> — распаковать архив (директория задаётся в окне)",
                     L"Cabine", MB_ICONINFORMATION);
         return 2;
     }

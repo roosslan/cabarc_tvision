@@ -310,10 +310,10 @@ void TCabineApp::runBatch()
     statusLine->hide();
     deskTop->changeBounds(getExtent());
     deskTop->drawView();
-    if (batch == BatchMode::Add)
-        batchAdd();
+    if (batch == BatchMode::Add || batch == BatchMode::AddAsk)
+        batchAdd(batch == BatchMode::AddAsk);
     else
-        batchExtract(batch == BatchMode::ExtractToDir);
+        batchExtract(batch == BatchMode::ExtractToDir, batch == BatchMode::ExtractAsk);
     batchPaths.clear();
     TEvent e;
     e.what = evCommand;
@@ -325,7 +325,7 @@ void TCabineApp::runBatch()
 // -a: файлы и директории помещаются в архив рядом с ними. Имя архива — по
 // единственному объекту или по директории, в которой лежат несколько объектов.
 // Существующий CAB с таким именем дополняется (одноимённые файлы заменяются).
-void TCabineApp::batchAdd()
+void TCabineApp::batchAdd(bool ask)
 {
     std::vector<std::string> items;
     std::string missing;
@@ -363,6 +363,40 @@ void TCabineApp::batchAdd()
         cab = fsu::joinPath(dir, name + " (" + std::to_string(n) + ").cab");
         exists = fsu::fileExists(cab) && cabRead(cab, existing, err);
     }
+
+    // -ai: предлагаемое имя можно изменить; расширение .exe — самораспаковывающийся архив.
+    std::string stub;
+    if (ask)
+    {
+        std::string chosen = cab;
+        for (;;)
+        {
+            if (!askPath("Добавить в архив", "~А~рхив:", PathKind::File, "*.cab", chosen))
+                return;
+            std::string path = fsu::fullPath(fsu::isAbsolutePath(chosen) ? chosen : fsu::joinPath(dir, chosen));
+            if (fsu::extension(path).empty())
+                path += ".cab";
+            if (fsu::dirExists(path))
+            {
+                showError("Существует директория с таким именем\n" + path);
+                continue;
+            }
+            existing = CabInfo();
+            exists = fsu::fileExists(path);
+            if (exists && !cabRead(path, existing, err))
+            {
+                showError("Файл существует и не является CAB-архивом\n" + path + "\n\n" + err);
+                continue;
+            }
+            if (!exists && fsu::upper(fsu::extension(path)) == "EXE" && !sfxStub(stub, err))
+            {
+                showError(err);
+                return;
+            }
+            cab = path;
+            break;
+        }
+    }
     if (exists && (existing.hasPrev || existing.hasNext))
     {
         showError("Изменение многотомных архивов не поддерживается\n" + cab);
@@ -389,13 +423,16 @@ void TCabineApp::batchAdd()
         [&](CabProgress *p, std::string &e) {
             p->onStage(fsu::baseName(cab));
             return exists ? cabUpdate(cab, {}, sources, comp, p, e)
-                          : cabCreate(cab, sources, comp, p, e);
+                          : cabCreate(cab, sources, comp, p, e, stub);
         }, kBatchHoldMs);
 }
 
 // -x: каждый архив распаковывается в директорию, где он лежит;
-// -e: в поддиректорию с именем архива (без расширения).
-void TCabineApp::batchExtract(bool toOwnDir)
+// -e: в поддиректорию с именем архива (без расширения);
+// -ei: в директорию, указанную в окне. Для одного архива предлагается
+// поддиректория с его именем; для нескольких — общая директория, в которой
+// каждый архив распаковывается в свою поддиректорию.
+void TCabineApp::batchExtract(bool toOwnDir, bool ask)
 {
     std::vector<std::string> cabs;
     std::string missing;
@@ -411,11 +448,24 @@ void TCabineApp::batchExtract(bool toOwnDir)
         showError("Не найдены:" + missing);
     if (cabs.empty())
         return;
+    std::string target;
+    if (ask)
+    {
+        bool single = cabs.size() == 1;
+        target = single ? fsu::joinPath(fsu::dirName(cabs[0]), fsu::stripExt(fsu::baseName(cabs[0])))
+                        : fsu::dirName(cabs[0]);
+        if (!askPath("Извлечь", single ? "~И~звлечь в:" : "~И~звлечь в (каждый архив — в свою поддиректорию):",
+                     PathKind::Directory, nullptr, target))
+            return;
+        target = fsu::fullPath(fsu::isAbsolutePath(target) ? target
+                                                           : fsu::joinPath(fsu::dirName(cabs[0]), target));
+        toOwnDir = !single;
+    }
     runWithProgress("Извлечение", [&](CabProgress *p, std::string &err) {
         for (const std::string &cab : cabs)
         {
             p->onStage("Извлечение " + fsu::baseName(cab));
-            std::string dest = fsu::dirName(cab);
+            std::string dest = ask ? target : fsu::dirName(cab);
             if (toOwnDir)
                 dest = fsu::joinPath(dest, fsu::stripExt(fsu::baseName(cab)));
             std::string e;

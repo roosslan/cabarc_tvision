@@ -1230,7 +1230,7 @@ void TPanelWindow::addFiles()
             def = fsu::isRootDir(fsDir) ? std::string("archive") : fsu::baseName(fsDir);
         }
         archivePath = fsu::joinPath(fsDir, def + ".cab");
-        if (!askText("Добавить в архив", "~А~рхив:", archivePath))
+        if (!askPath("Добавить в архив", "~А~рхив:", PathKind::File, "*.cab", archivePath))
             return;
         if (!fsu::isAbsolutePath(archivePath))
             archivePath = fsu::joinPath(fsDir, archivePath);

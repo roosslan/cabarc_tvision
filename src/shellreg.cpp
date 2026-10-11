@@ -14,8 +14,9 @@ const wchar_t *const kRoot = L"Software\\Classes\\";
 const wchar_t *const kMenuKey = L"AllFilesystemObjects\\shell\\Cabine";
 const wchar_t *const kOpenKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\01open";
 const wchar_t *const kExtractKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\02extract";
-const wchar_t *const kExtractDirKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\03extractdir";
+const wchar_t *const kExtractToKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\03extractto";
 const wchar_t *const kAddKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\04add";
+const wchar_t *const kAddToKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\05addto";
 const wchar_t *const kOnlyArchives =
     L"System.FileExtension:=.cab OR System.FileExtension:=.zip OR System.FileExtension:=.rar";
 
@@ -116,10 +117,12 @@ bool registerShellMenu(const std::string &cabineExe, const std::string &shellExe
                    quoted(cabineExe) + L" \"%1\"", L"Single", kOnlyArchives}, err) &&
         writeVerb({kExtractKey, L"Распаковать здесь", icon,
                    quoted(shellExe) + L" -x \"%1\"", L"Player", kOnlyArchives}, err) &&
-        writeVerb({kExtractDirKey, L"Извлечь в директорию с именем архива", icon,
-                   quoted(shellExe) + L" -e \"%1\"", L"Player", kOnlyArchives}, err) &&
+        writeVerb({kExtractToKey, L"Извлечь в ...", icon,
+                   quoted(shellExe) + L" -ei \"%1\"", L"Player", kOnlyArchives}, err) &&
         writeVerb({kAddKey, L"Добавить в CAB-архив", icon,
-                   quoted(shellExe) + L" -a \"%1\"", L"Player", nullptr}, err);
+                   quoted(shellExe) + L" -a \"%1\"", L"Player", nullptr}, err) &&
+        writeVerb({kAddToKey, L"Добавить в архив ...", icon,
+                   quoted(shellExe) + L" -ai \"%1\"", L"Player", nullptr}, err);
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
     return ok;
 }

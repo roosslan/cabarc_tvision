@@ -324,6 +324,8 @@ public:
                   const std::string &start);
 
     Boolean valid(ushort command) override;
+    // Начальное имя файла в строке ввода (вместо маски).
+    void setName(const std::string &name) { setInput(name); }
 
     std::string result;
 
@@ -1124,6 +1126,84 @@ bool chooseDirectory(const std::string &start, std::string &dir)
         dir = d->result;
     TObject::destroy(d);
     return ok;
+}
+
+namespace {
+
+// Окно ввода пути с кнопкой «Обзор...», как в продуктах Borland.
+class TPathDialog : public TDialog
+{
+public:
+    TPathDialog(const char *title, const char *label, PathKind kind, const char *wildcard,
+                const std::string &value) :
+        TWindowInit(&TDialog::initFrame),
+        TDialog(TRect(0, 0, 72, 9), title),
+        kind(kind),
+        wildcard(wildcard ? wildcard : "*.*")
+    {
+        options |= ofCentered;
+        input = new TInputLine(TRect(3, 3, 56, 4), 1024);
+        insert(input);
+        insert(new TLabel(TRect(2, 2, 54, 3), label, input));
+        insert(new TButton(TRect(57, 2, 69, 4), "~О~бзор...", cmBrowseDir, bfNormal));
+        insert(new TButton(TRect(23, 6, 35, 8), "O~K~", cmOK, bfDefault));
+        insert(new TButton(TRect(37, 6, 49, 8), "Отмена", cmCancel, bfNormal));
+        setInputText(input, value);
+        selectNext(False);
+    }
+
+    void handleEvent(TEvent &ev) override
+    {
+        TDialog::handleEvent(ev);
+        if (ev.what != evCommand || ev.message.command != cmBrowseDir)
+            return;
+        std::string current = input->data, chosen;
+        bool ok;
+        if (kind == PathKind::Directory)
+        {
+            std::string start = current;
+            while (!start.empty() && !fsu::dirExists(start) && fsu::dirName(start) != start)
+                start = fsu::dirName(start);
+            ok = chooseDirectory(start, chosen);
+        }
+        else
+        {
+            TBrowseDialog *d = new TBrowseDialog("Выбор файла", BrowseMode::Save, wildcard,
+                                                 fsu::dirName(current));
+            if (!current.empty())
+                d->setName(fsu::baseName(current));
+            ok = TProgram::deskTop->execView(d) == cmOK;
+            if (ok)
+                chosen = d->result;
+            TObject::destroy(d);
+        }
+        if (ok)
+        {
+            setInputText(input, chosen);
+            input->selectAll(True);
+            input->drawView();
+        }
+        clearEvent(ev);
+    }
+
+    TInputLine *input;
+
+private:
+    PathKind kind;
+    std::string wildcard;
+};
+
+} // namespace
+
+bool askPath(const char *title, const char *label, PathKind kind, const char *wildcard,
+             std::string &value)
+{
+    TPathDialog *d = new TPathDialog(title, label, kind, wildcard, value);
+    bool ok = TProgram::deskTop->execView(d) == cmOK;
+    if (ok)
+        value = d->input->data;
+    TObject::destroy(d);
+    return ok && !value.empty();
 }
 
 bool askText(const char *title, const char *label, std::string &value)
