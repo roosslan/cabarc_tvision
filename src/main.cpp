@@ -21,6 +21,40 @@ const char *const kUsage =
     "Вместо пути можно указать @<файл> — список путей в UTF-8, по одному в строке\n"
     "(файл удаляется после чтения).\n";
 
+// Путь с пробелами, переданный без кавычек, Windows делит на несколько
+// аргументов: «D:\dru-xrpc (1).cab» приходит как «D:\dru-xrpc» и «(1).cab».
+// Несуществующий аргумент склеивается через пробел со следующими, пока
+// не получится существующий файл или директория.
+std::vector<std::string> joinSplitPaths(const std::vector<std::string> &args)
+{
+    auto exists = [](const std::string &p) { return fsu::fileExists(p) || fsu::dirExists(p); };
+    std::vector<std::string> out;
+    for (size_t i = 0; i < args.size(); ++i)
+    {
+        if (args[i].empty() || args[i][0] == '@' || exists(args[i]))
+        {
+            out.push_back(args[i]);
+            continue;
+        }
+        std::string joined = args[i];
+        size_t j = i + 1;
+        for (; j < args.size(); ++j)
+        {
+            joined += " " + args[j];
+            if (exists(joined))
+                break;
+        }
+        if (j < args.size())
+        {
+            out.push_back(joined);
+            i = j;
+        }
+        else
+            out.push_back(args[i]);
+    }
+    return out;
+}
+
 // @файл — список путей; создаётся cabine-shell.exe и удаляется после чтения.
 void expandList(const std::string &arg, std::vector<std::string> &out)
 {
@@ -89,8 +123,9 @@ int main()
             batch = opt == "-a" ? BatchMode::Add
                   : opt == "-x" ? BatchMode::Extract
                                 : BatchMode::ExtractToDir;
-            for (size_t i = 1; i < args.size(); ++i)
-                expandList(args[i], paths);
+            std::vector<std::string> rest(args.begin() + 1, args.end());
+            for (const std::string &a : joinSplitPaths(rest))
+                expandList(a, paths);
             if (paths.empty())
             {
                 fsu::printConsole(kUsage);
@@ -98,7 +133,7 @@ int main()
             }
         }
         else
-            for (const std::string &a : args)
+            for (const std::string &a : joinSplitPaths(args))
                 expandList(a, paths);
     }
 
