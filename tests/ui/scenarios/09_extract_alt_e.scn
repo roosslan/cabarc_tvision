@@ -1,0 +1,16 @@
+# Alt+E открывает окно «Извлечь файлы» (как F5); в «О программе» — версия 2.3.
+#copy {DATA}\test.cab | {WORK}\panel\p.cab
+size 100 30
+run "{CABINE}" "{WORK}\panel\p.cab"
+waitfor 5000 numbers
+key Alt+E
+waitfor 3000 Извлечь файлы
+key Esc
+wait 300
+key Alt+Y
+key End
+key Enter
+waitfor 3000 Cabine 2.3
+key Enter
+key Alt+X
+exit 3000
