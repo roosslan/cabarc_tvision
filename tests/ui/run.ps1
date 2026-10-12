@@ -68,7 +68,10 @@ function Setup([string]$cmd, [string[]]$a) {
         'zip' {
             EnsureParent $a[1]
             if (Test-Path -LiteralPath $a[1]) { Remove-Item -LiteralPath $a[1] -Force }
-            Compress-Archive -Path (Join-Path $a[0] '*') -DestinationPath $a[1]
+            # Средствами .NET: командлеты модулей PowerShell могут не загрузиться,
+            # если скрипт запущен из PowerShell 7 (так на раннерах GitHub).
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            [IO.Compression.ZipFile]::CreateFromDirectory($a[0], $a[1])
         }
         'targz' {
             EnsureParent $a[2]
@@ -80,14 +83,19 @@ function Setup([string]$cmd, [string[]]$a) {
     return $true
 }
 
+$sha = [Security.Cryptography.SHA256]::Create()
+function FileHash([string]$path) {
+    return [BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($path)))
+}
+
 function SameTree([string]$a, [string]$b) {
     if (-not (Test-Path -LiteralPath $b)) { return "нет $b" }
     $la = @(Get-ChildItem -LiteralPath $a -Recurse -File | ForEach-Object { $_.FullName.Substring($a.Length) } | Sort-Object)
     $lb = @(Get-ChildItem -LiteralPath $b -Recurse -File | ForEach-Object { $_.FullName.Substring($b.Length) } | Sort-Object)
     if (($la -join '|') -ne ($lb -join '|')) { return "разный состав файлов: $($la -join ', ') / $($lb -join ', ')" }
     foreach ($rel in $la) {
-        $ha = (Get-FileHash -LiteralPath ($a + $rel)).Hash
-        $hb = (Get-FileHash -LiteralPath ($b + $rel)).Hash
+        $ha = FileHash ($a + $rel)
+        $hb = FileHash ($b + $rel)
         if ($ha -ne $hb) { return "различается $rel" }
     }
     return ''
@@ -139,8 +147,11 @@ foreach ($s in $scenarios) {
             $problems += $log | Where-Object { $_ -match 'НЕ НАЙДЕНО|НЕ завершился|ожидался код|принудительно|неизвестная|CreateProcess' }
         }
         foreach ($c in $checks) {
-            $r = Check $c[0] $c[1]
-            if ($r) { $problems += $r }
+            try {
+                $r = Check $c[0] $c[1]
+                if ($r) { $problems += $r }
+            }
+            catch { $problems += "проверка $($c[0]): $_" }
         }
     }
     if ($problems) {

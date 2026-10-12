@@ -228,8 +228,11 @@ if (CABINE_TESTS)
     if (MSVC)
         target_compile_options(cabine-uidriver PRIVATE /W3 /utf-8)
     endif()
+    # PSModulePath сбрасывается: при запуске из PowerShell 7 (шаг CI) Windows
+    # PowerShell 5.1 иначе получает чужие пути модулей и не находит командлеты.
     add_test(NAME ui
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        COMMAND ${CMAKE_COMMAND} -E env --unset=PSModulePath
+                powershell -NoProfile -ExecutionPolicy Bypass
                 -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/ui/run.ps1" -Bin "$<TARGET_FILE_DIR:cabine>")
     set_tests_properties(ui PROPERTIES TIMEOUT 900)
 endif()
