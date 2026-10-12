@@ -16,7 +16,7 @@ struct CompressionSpec
 };
 
 // Формат архива. Структуры CabInfo и CabEntry описывают архив любого формата.
-enum class ArchiveFormat { Unknown, Cab, Zip, Rar };
+enum class ArchiveFormat { Unknown, Cab, Zip, Rar, Gz, Tar, TarGz };
 
 struct CabEntry
 {

@@ -21,6 +21,8 @@ extern "C" {
 #include "mz_zip_rw.h"
 }
 
+#include "zlib.h"
+
 namespace {
 
 int failures = 0;
@@ -630,6 +632,202 @@ void testRar(const std::string &root)
     check(!extracted && err.find("том") != std::string::npos, "без следующего тома — понятная ошибка: " + err);
 }
 
+// ---------------------------------------------------------------------------
+// GZ, TAR, TAR.GZ
+// ---------------------------------------------------------------------------
+
+struct TarItem
+{
+    std::string name;       // имя в архиве (UTF-8, разделитель '/')
+    std::string data;
+    char type = '0';
+    bool pax = false;       // имя передаётся расширенным заголовком pax
+};
+
+void tarHeader(std::string &out, const std::string &name, uint64_t size, char type)
+{
+    char h[512] = {};
+    memcpy(h, name.data(), std::min<size_t>(name.size(), 100));
+    snprintf(h + 100, 8, "%07o", 0644);
+    snprintf(h + 108, 8, "%07o", 0);
+    snprintf(h + 116, 8, "%07o", 0);
+    snprintf(h + 124, 12, "%011llo", (unsigned long long) size);
+    snprintf(h + 136, 12, "%011llo", 1700000000ull);   // 14.11.2023
+    memset(h + 148, ' ', 8);
+    h[156] = type;
+    memcpy(h + 257, "ustar", 6);
+    memcpy(h + 263, "00", 2);
+    unsigned sum = 0;
+    for (unsigned char c : h)
+        sum += c;
+    snprintf(h + 148, 8, "%06o", sum);
+    h[155] = ' ';
+    out.append(h, 512);
+}
+
+void tarData(std::string &out, const std::string &data)
+{
+    out += data;
+    out.append((512 - data.size() % 512) % 512, '\0');
+}
+
+// tar-архив: длинные имена — записью GNU 'L', отмеченные pax — заголовком 'x'.
+std::string makeTar(const std::vector<TarItem> &items)
+{
+    std::string out;
+    for (const TarItem &it : items)
+    {
+        std::string name = it.name;
+        if (it.pax)
+        {
+            std::string rec = " path=" + name + "\n";
+            std::string len = std::to_string(rec.size() + 2);
+            if (len.size() + rec.size() != std::stoul(len))
+                len = std::to_string(rec.size() + len.size());
+            std::string pax = len + rec;
+            tarHeader(out, "PaxHeader/file", pax.size(), 'x');
+            tarData(out, pax);
+            name = "short.txt";
+        }
+        else if (name.size() > 100)
+        {
+            tarHeader(out, "././@LongLink", name.size() + 1, 'L');
+            tarData(out, name + '\0');
+            name = name.substr(0, 100);
+        }
+        tarHeader(out, name, it.type == '0' ? it.data.size() : 0, it.type);
+        if (it.type == '0')
+            tarData(out, it.data);
+    }
+    out.append(1024, '\0');
+    return out;
+}
+
+bool gzipFile(const std::string &path, const std::string &data)
+{
+    gzFile gz = gzopen_w(fsu::widen(path).c_str(), "wb9");
+    if (!gz)
+        return false;
+    bool ok = data.empty() || gzwrite(gz, data.data(), (unsigned) data.size()) == (int) data.size();
+    return gzclose(gz) == Z_OK && ok;
+}
+
+void testTarGz(const std::string &root, const std::string &big)
+{
+    section("TAR, TAR.GZ, GZ");
+    std::string dir = fsu::joinPath(root, "tar");
+    fsu::makeDirs(dir);
+    std::string err;
+    CabResult res;
+
+    std::string longName = "long/" + std::string(110, 'x') + "/файл.txt";
+    std::vector<TarItem> items = {
+        {"readme.txt", "Hello, TAR!\n"},
+        {"Документ.txt", "Привет, TAR!"},
+        {"sub/", "", '5'},
+        {"sub/Вложенный/data.bin", kBinary},
+        {"sub/big.log", big},
+        {"empty.dat", ""},
+        {longName, "длинное имя"},
+        {"pax/имя через pax.txt", "pax", '0', true},
+    };
+    std::string tarData = makeTar(items);
+    std::string tar = fsu::joinPath(dir, "sample.tar");
+    writeFile(tar, tarData);
+
+    check(archiveFormat(tar) == ArchiveFormat::Tar, "формат определён: TAR");
+    CabInfo info;
+    check(archRead(tar, info, err) && info.entries.size() == 7 && info.format == ArchiveFormat::Tar,
+          "archRead TAR: 7 файлов " + err);
+    check(hasEntry(info, "Документ.txt") && hasEntry(info, "sub\\Вложенный\\data.bin"), "кириллица и вложенные пути");
+    std::string longWin = longName;
+    for (char &c : longWin)
+        if (c == '/')
+            c = '\\';
+    check(hasEntry(info, longWin), "длинное имя GNU (запись L)");
+    check(hasEntry(info, "pax\\имя через pax.txt"), "имя из заголовка pax");
+
+    std::string out = fsu::joinPath(dir, "out_tar");
+    bool ok = archExtract(tar, out, {}, true, Overwrite::Always, nullptr, err, &res);
+    check(ok && res.files == 7, "archExtract TAR " + err);
+    check(readFile(fsu::joinPath(out, "Документ.txt")) == "Привет, TAR!" &&
+          readFile(fsu::joinPath(out, "sub\\big.log")) == big &&
+          readFile(fsu::joinPath(out, "sub\\Вложенный\\data.bin")) == kBinary &&
+          fsu::fileExists(fsu::joinPath(out, "empty.dat")) &&
+          readFile(fsu::joinPath(out, longWin)) == "длинное имя" &&
+          readFile(fsu::joinPath(out, "pax\\имя через pax.txt")) == "pax",
+          "содержимое файлов TAR");
+
+    std::string based = fsu::joinPath(dir, "based");
+    ok = archExtract(tar, based, {"sub\\Вложенный\\data.bin"}, true, Overwrite::Always, nullptr, err, &res, "sub");
+    check(ok && res.files == 1 && readFile(fsu::joinPath(based, "Вложенный\\data.bin")) == kBinary,
+          "выбранный файл с путём относительно директории архива");
+
+    // tar.gz и tgz.
+    for (const char *name : {"sample.tar.gz", "sample.tgz"})
+    {
+        std::string tgz = fsu::joinPath(dir, name);
+        check(gzipFile(tgz, tarData), std::string("создан ") + name);
+        check(archiveFormat(tgz) == ArchiveFormat::TarGz, std::string(name) + ": формат TAR.GZ");
+        ok = archRead(tgz, info, err);
+        check(ok && info.entries.size() == 7 && info.method == "gzip", std::string(name) + ": 7 файлов " + err);
+        ok = archTest(tgz, nullptr, err, &res);
+        check(ok && res.files == 7, std::string(name) + ": проверка " + err);
+        std::string o = fsu::joinPath(dir, std::string("out_") + name);
+        ok = archExtract(tgz, o, {}, true, Overwrite::Always, nullptr, err, &res);
+        check(ok && readFile(fsu::joinPath(o, "sub\\big.log")) == big, std::string(name) + ": распаковка " + err);
+    }
+
+    // Отдельный файл в gzip.
+    std::string gz = fsu::joinPath(dir, "big.log.gz");
+    check(gzipFile(gz, big), "создан big.log.gz");
+    check(archiveFormat(gz) == ArchiveFormat::Gz, "формат GZIP");
+    ok = archRead(gz, info, err);
+    check(ok && info.entries.size() == 1 && info.entries[0].name == "big.log" && info.entries[0].size == big.size(),
+          "в GZIP один файл big.log с размером из заголовка");
+    std::string go = fsu::joinPath(dir, "out_gz");
+    ok = archExtract(gz, go, {}, true, Overwrite::Always, nullptr, err, &res);
+    check(ok && res.files == 1 && readFile(fsu::joinPath(go, "big.log")) == big, "распаковка GZIP " + err);
+
+    // Повреждённые данные gzip.
+    std::string data = readFile(gz);
+    std::string broken = fsu::joinPath(dir, "broken.log.gz");
+    for (size_t i = data.size() / 2; i < data.size() / 2 + 64; ++i)
+        data[i] = (char) ~data[i];
+    writeFile(broken, data);
+    ok = archTest(broken, nullptr, err);
+    check(!ok, "повреждённый GZIP не проходит проверку: " + err);
+
+    // Отмена.
+    CancelProgress cp;
+    ok = archExtract(tar, fsu::joinPath(dir, "cancel"), {}, true, Overwrite::Always, &cp, err);
+    check(!ok && err == kCabCancelled, "отмена распаковки TAR");
+
+    check(archiveStem("D:\\x\\src.tar.gz") == "src" && archiveStem("a.tgz") == "a" &&
+          archiveStem("b.gz") == "b" && archiveStem("Отчёт.zip") == "Отчёт",
+          "archiveStem: .tar.gz снимается целиком");
+
+    // Архив, созданный системным tar.exe (bsdtar, есть в Windows 10 1803 и новее).
+    wchar_t sys[MAX_PATH];
+    GetSystemDirectoryW(sys, MAX_PATH);
+    std::string tarExe = fsu::joinPath(fsu::narrow(sys), "tar.exe");
+    if (fsu::fileExists(tarExe))
+    {
+        std::string src = fsu::joinPath(dir, "systar_src");
+        writeFile(fsu::joinPath(src, "Отчёт.txt"), "из tar.exe");
+        writeFile(fsu::joinPath(src, "inner\\b.txt"), "b");
+        std::string sysTgz = fsu::joinPath(dir, "system.tgz");
+        int code = runProcess("\"" + tarExe + "\" -czf \"" + sysTgz + "\" -C \"" + src + "\" .");
+        check(code == 0, "tar.exe создал архив (код " + std::to_string(code) + ")");
+        std::string so = fsu::joinPath(dir, "out_system");
+        ok = archExtract(sysTgz, so, {}, true, Overwrite::Always, nullptr, err, &res);
+        check(ok && readFile(fsu::joinPath(so, "inner\\b.txt")) == "b", "распаковка архива tar.exe " + err);
+        check(readFile(fsu::joinPath(so, "Отчёт.txt")) == "из tar.exe", "кириллическое имя из tar.exe");
+    }
+    else
+        fsu::printConsole("пропущено: нет tar.exe\n");
+}
+
 void testDetection(const std::string &root)
 {
     section("Определение формата");
@@ -692,6 +890,7 @@ int main()
     setPasswordPrompt(scriptedPassword);
     testZip(root, big);
     testRar(root);
+    testTarGz(root, big);
     testDetection(root);
 
     fsu::printConsole("\nПроверок: " + std::to_string(checks) + ", ошибок: " + std::to_string(failures) + "\n");

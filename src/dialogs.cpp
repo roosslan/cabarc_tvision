@@ -1187,25 +1187,27 @@ bool sfxDialog(const std::string &about, ExtractOptions &opt)
 
 bool settingsDialog(Settings &s)
 {
-    TDialog *d = new TDialog(TRect(0, 0, 52, 15), "Параметры");
+    TDialog *d = new TDialog(TRect(0, 0, 56, 16), "Параметры");
     d->options |= ofCentered;
-    TCheckBoxes *general = new TCheckBoxes(TRect(3, 3, 49, 7),
+    TCheckBoxes *general = new TCheckBoxes(TRect(3, 3, 53, 8),
         new TSItem("Ассоциировать файлы CAB с Cabine",
         new TSItem("Ассоциировать файлы ZIP с Cabine",
         new TSItem("Ассоциировать файлы RAR с Cabine",
-        new TSItem("Показывать архивы первыми", nullptr)))));
+        new TSItem("Ассоциировать файлы TAR, TGZ и GZ с Cabine",
+        new TSItem("Показывать архивы первыми", nullptr))))));
     d->insert(general);
     d->insert(new TLabel(TRect(2, 2, 30, 3), "~О~бщие:", general));
     setClusterValue(general, (s.associateCab ? 1 : 0) | (s.associateZip ? 2 : 0) |
-                             (s.associateRar ? 4 : 0) | (s.archivesFirst ? 8 : 0));
+                             (s.associateRar ? 4 : 0) | (s.associateTar ? 8 : 0) |
+                             (s.archivesFirst ? 16 : 0));
 
-    TComboBox *level = new TComboBox(TRect(3, 9, 30, 10), compressionLevels(),
+    TComboBox *level = new TComboBox(TRect(3, 10, 30, 11), compressionLevels(),
                                      compressionLevel(s.compression));
     d->insert(level);
-    d->insert(new TLabel(TRect(2, 8, 40, 9), "~С~жатие новых архивов:", level));
+    d->insert(new TLabel(TRect(2, 9, 40, 10), "~С~жатие новых архивов:", level));
 
-    d->insert(new TButton(TRect(13, 12, 25, 14), "O~K~", cmOK, bfDefault));
-    d->insert(new TButton(TRect(27, 12, 39, 14), "Отмена", cmCancel, bfNormal));
+    d->insert(new TButton(TRect(15, 13, 27, 15), "O~K~", cmOK, bfDefault));
+    d->insert(new TButton(TRect(29, 13, 41, 15), "Отмена", cmCancel, bfNormal));
     d->selectNext(False);
     ushort r = TProgram::deskTop->execView(d);
     if (r == cmOK)
@@ -1214,7 +1216,8 @@ bool settingsDialog(Settings &s)
         s.associateCab = (g & 1) != 0;
         s.associateZip = (g & 2) != 0;
         s.associateRar = (g & 4) != 0;
-        s.archivesFirst = (g & 8) != 0;
+        s.associateTar = (g & 8) != 0;
+        s.archivesFirst = (g & 16) != 0;
         s.compression = compressionOfLevel(level->current());
     }
     TObject::destroy(d);

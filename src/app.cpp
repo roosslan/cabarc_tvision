@@ -255,7 +255,7 @@ void TCabineApp::newArchive()
 void TCabineApp::openArchiveDialog()
 {
     std::string path;
-    if (chooseFile("Открыть архив", "*.cab;*.zip;*.rar", false, path))
+    if (chooseFile("Открыть архив", "*.cab;*.zip;*.rar;*.gz;*.tgz;*.tar", false, path))
         openPath(path);
 }
 
@@ -265,6 +265,7 @@ void TCabineApp::options()
     s.associateCab = isAssociated("cab");
     s.associateZip = isAssociated("zip");
     s.associateRar = isAssociated("rar");
+    s.associateTar = isAssociated("tar") && isAssociated("tgz") && isAssociated("gz");
     s.archivesFirst = panel ? panel->archivesFirst : fsu::loadSetting("ArchivesFirst", "0") == "1";
     s.compression = defaultCompression;
     Settings was = s;
@@ -285,6 +286,9 @@ void TCabineApp::options()
         {"cab", s.associateCab, was.associateCab},
         {"zip", s.associateZip, was.associateZip},
         {"rar", s.associateRar, was.associateRar},
+        {"tar", s.associateTar, was.associateTar},
+        {"tgz", s.associateTar, was.associateTar},
+        {"gz", s.associateTar, was.associateTar},
     };
     std::string overridden;
     for (const auto &a : assoc)
@@ -485,7 +489,7 @@ void TCabineApp::batchExtract(bool toOwnDir, bool ask)
     if (ask)
     {
         bool single = cabs.size() == 1;
-        target = single ? fsu::joinPath(fsu::dirName(cabs[0]), fsu::stripExt(fsu::baseName(cabs[0])))
+        target = single ? fsu::joinPath(fsu::dirName(cabs[0]), archiveStem(cabs[0]))
                         : fsu::dirName(cabs[0]);
         if (!askPath("Извлечь", single ? "~И~звлечь в:" : "~И~звлечь в (каждый архив — в свою поддиректорию):",
                      PathKind::Directory, nullptr, target))
@@ -500,7 +504,7 @@ void TCabineApp::batchExtract(bool toOwnDir, bool ask)
             p->onStage("Извлечение " + fsu::baseName(cab));
             std::string dest = ask ? target : fsu::dirName(cab);
             if (toOwnDir)
-                dest = fsu::joinPath(dest, fsu::stripExt(fsu::baseName(cab)));
+                dest = fsu::joinPath(dest, archiveStem(cab));
             std::string e;
             if (!archExtract(cab, dest, {}, true, Overwrite::Ask, p, e))
             {

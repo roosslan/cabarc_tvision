@@ -88,9 +88,10 @@ bool extractDialog(int selectedCount, int totalCount, ExtractOptions &opt);
 bool sfxDialog(const std::string &about, ExtractOptions &opt);
 struct Settings
 {
-    bool associateCab = false;      // файлы .cab, .zip, .rar открываются в Cabine
+    bool associateCab = false;      // файлы архивов открываются в Cabine
     bool associateZip = false;
     bool associateRar = false;
+    bool associateTar = false;      // .tar, .tgz и .gz (в том числе .tar.gz)
     bool archivesFirst = false;     // архивы в панели выше остальных файлов
     CompressionSpec compression;    // метод сжатия новых архивов
 };
