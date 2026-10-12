@@ -27,6 +27,9 @@ extern "C" {
 // с RARDLL. Лицензия UnRAR — в README, раздел «Сторонние библиотеки».
 #include "dll.hpp"
 
+// zlib: распаковка gzip (.gz, .tar.gz, .tgz).
+#include "zlib.h"
+
 namespace {
 
 const uint16_t kAttrMask = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN |
@@ -707,6 +710,570 @@ bool rarExtract(ExtractJob &j)
     return true;
 }
 
+uint16_t rd16(const uint8_t *p) { return uint16_t(p[0] | (p[1] << 8)); }
+uint32_t rd32(const uint8_t *p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (uint32_t(p[3]) << 24); }
+
+// ---------------------------------------------------------------------------
+// GZ, TAR, TAR.GZ (zlib и собственный разбор tar)
+// ---------------------------------------------------------------------------
+
+// Последовательное чтение: обычный файл (tar) или распаковка gzip (gz, tar.gz).
+class Source
+{
+public:
+    Source(const std::string &path, bool gzip) : gzip(gzip)
+    {
+        std::wstring w = fsu::widen(path);
+        if (gzip)
+            gz = gzopen_w(w.c_str(), "rb");
+        else
+            file = _wfopen(w.c_str(), L"rb");
+    }
+
+    ~Source()
+    {
+        if (gz)
+            gzclose(gz);
+        if (file)
+            fclose(file);
+    }
+
+    bool isOpen() const { return gz || file; }
+
+    // Читает до n байт; меньше — только в конце данных. -1 — ошибка.
+    int64_t read(void *buf, size_t n)
+    {
+        size_t total = 0;
+        while (total < n)
+        {
+            unsigned chunk = (unsigned) std::min<size_t>(n - total, 1 << 20);
+            int got;
+            if (gzip)
+            {
+                got = gzread(gz, static_cast<char *>(buf) + total, chunk);
+                if (got < 0)
+                    return -1;
+            }
+            else
+            {
+                got = (int) fread(static_cast<char *>(buf) + total, 1, chunk, file);
+                if (got == 0 && ferror(file))
+                    return -1;
+            }
+            if (got == 0)
+                break;
+            total += (size_t) got;
+        }
+        return (int64_t) total;
+    }
+
+    // Текст ошибки распаковки gzip (повреждённые данные, неверная контрольная сумма).
+    std::string error()
+    {
+        int code = Z_OK;
+        const char *msg = gz ? gzerror(gz, &code) : nullptr;
+        if (gz && code != Z_OK && code != Z_BUF_ERROR)
+            return std::string("Ошибка распаковки gzip: архив повреждён (") + (msg ? msg : "") + ")";
+        return "Ошибка чтения архива";
+    }
+
+private:
+    bool gzip;
+    gzFile gz = nullptr;
+    FILE *file = nullptr;
+};
+
+const size_t kTarBlock = 512;
+
+uint64_t tarNumber(const uint8_t *p, size_t n)
+{
+    // Большие значения GNU tar хранит в двоичном виде (старший бит первого байта).
+    if (p[0] & 0x80)
+    {
+        uint64_t v = p[0] & 0x7F;
+        for (size_t i = 1; i < n; ++i)
+            v = (v << 8) | p[i];
+        return v;
+    }
+    uint64_t v = 0;
+    for (size_t i = 0; i < n && p[i]; ++i)
+        if (p[i] >= '0' && p[i] <= '7')
+            v = v * 8 + (p[i] - '0');
+    return v;
+}
+
+std::string tarString(const uint8_t *p, size_t n)
+{
+    size_t len = 0;
+    while (len < n && p[len])
+        ++len;
+    return std::string(reinterpret_cast<const char *>(p), len);
+}
+
+// Заголовок tar: контрольная сумма считается с полем суммы, заполненным пробелами.
+bool tarChecksumOk(const uint8_t *h)
+{
+    uint64_t stored = tarNumber(h + 148, 8);
+    uint64_t sum = 0;
+    for (size_t i = 0; i < kTarBlock; ++i)
+        sum += (i >= 148 && i < 156) ? ' ' : h[i];
+    return sum == stored;
+}
+
+bool tarZeroBlock(const uint8_t *h)
+{
+    for (size_t i = 0; i < kTarBlock; ++i)
+        if (h[i])
+            return false;
+    return true;
+}
+
+// Имена в tar — обычно UTF-8; иначе считаются в кодировке ANSI системы.
+std::string tarName(std::string raw)
+{
+    if (!fsu::isAscii(raw) && !fsu::isValidUtf8(raw))
+        raw = fsu::fromCodePage(raw, CP_ACP);
+    for (char &c : raw)
+        if (c == '/')
+            c = '\\';
+    while (raw.compare(0, 2, ".\\") == 0)
+        raw.erase(0, 2);
+    while (!raw.empty() && raw.back() == '\\')
+        raw.pop_back();
+    return raw;
+}
+
+// Записи pax: "<длина> <ключ>=<значение>\n".
+void parsePax(const std::string &data, std::string &path, uint64_t &size, bool &hasSize, time_t &mtime)
+{
+    size_t pos = 0;
+    while (pos < data.size())
+    {
+        size_t sp = data.find(' ', pos);
+        if (sp == std::string::npos)
+            break;
+        size_t len = (size_t) strtoull(data.c_str() + pos, nullptr, 10);
+        if (len == 0 || pos + len > data.size())
+            break;
+        std::string rec = data.substr(sp + 1, pos + len - sp - 1);
+        if (!rec.empty() && rec.back() == '\n')
+            rec.pop_back();
+        size_t eq = rec.find('=');
+        if (eq != std::string::npos)
+        {
+            std::string key = rec.substr(0, eq), value = rec.substr(eq + 1);
+            if (key == "path")
+                path = value;
+            else if (key == "size")
+            {
+                size = strtoull(value.c_str(), nullptr, 10);
+                hasSize = true;
+            }
+            else if (key == "mtime")
+                mtime = (time_t) strtoll(value.c_str(), nullptr, 10);
+        }
+        pos += len;
+    }
+}
+
+struct TarEntry
+{
+    std::string name;
+    uint64_t size = 0;      // размер данных в архиве
+    time_t mtime = 0;
+    char type = '0';
+    bool isFile() const { return type == '0' || type == '\0' || type == '7'; }
+    bool isDir() const { return type == '5'; }
+};
+
+// Обход tar: для каждой записи вызывается onEntry, который может прочитать
+// данные (readData) — иначе они пропускаются. Возвращает false при ошибке.
+class TarWalker
+{
+public:
+    explicit TarWalker(Source &src) : src(src) {}
+
+    template <class F>
+    bool walk(F onEntry, std::string &err)
+    {
+        std::vector<uint8_t> h(kTarBlock);
+        std::string longName, paxPath;
+        uint64_t paxSize = 0;
+        bool paxHasSize = false;
+        time_t paxTime = 0;
+        for (;;)
+        {
+            int64_t got = src.read(h.data(), kTarBlock);
+            if (got < 0)
+            {
+                err = src.error();
+                return false;
+            }
+            if (got == 0 || tarZeroBlock(h.data()))
+                return true;    // конец архива
+            if (got < (int64_t) kTarBlock || !tarChecksumOk(h.data()))
+            {
+                err = "Архив повреждён: неверный заголовок tar";
+                return false;
+            }
+            TarEntry e;
+            e.type = (char) h[156];
+            e.size = tarNumber(h.data() + 124, 12);
+            e.mtime = (time_t) tarNumber(h.data() + 136, 12);
+            std::string name = tarString(h.data(), 100);
+            if (memcmp(h.data() + 257, "ustar", 5) == 0)
+            {
+                std::string prefix = tarString(h.data() + 345, 155);
+                if (!prefix.empty())
+                    name = prefix + "/" + name;
+            }
+
+            // Служебные записи: длинное имя GNU и расширенный заголовок pax.
+            if (e.type == 'L' || e.type == 'x' || e.type == 'g' || e.type == 'K')
+            {
+                std::string data;
+                if (!readAll(e.size, data, err))
+                    return false;
+                if (e.type == 'L')
+                    longName = tarString(reinterpret_cast<const uint8_t *>(data.data()), data.size());
+                else if (e.type == 'x')
+                    parsePax(data, paxPath, paxSize, paxHasSize, paxTime);
+                continue;
+            }
+            if (!longName.empty())
+                name = longName;
+            if (!paxPath.empty())
+                name = paxPath;
+            if (paxHasSize)
+                e.size = paxSize;
+            if (paxTime)
+                e.mtime = paxTime;
+            longName.clear();
+            paxPath.clear();
+            paxHasSize = false;
+            paxTime = 0;
+
+            e.name = tarName(name);
+            remaining = e.isFile() ? e.size : 0;
+            uint64_t padded = (e.size + kTarBlock - 1) / kTarBlock * kTarBlock;
+            uint64_t dataBlocks = (e.isFile() || e.type == '1' || e.type == '2') ? 0 : padded;
+            if (!e.isFile())
+                remaining = 0;
+            int r = onEntry(e, *this);
+            if (r < 0)
+                return false;
+            // Непрочитанные данные и выравнивание до блока пропускаются.
+            uint64_t skip = remaining + (e.isFile() ? padded - e.size : dataBlocks);
+            if (!skipBytes(skip, err))
+                return false;
+        }
+    }
+
+    // Чтение данных текущей записи; 0 — данные закончились, -1 — ошибка.
+    int64_t readData(void *buf, size_t n)
+    {
+        size_t want = (size_t) std::min<uint64_t>(n, remaining);
+        if (want == 0)
+            return 0;
+        int64_t got = src.read(buf, want);
+        if (got <= 0)
+            return -1;
+        remaining -= (uint64_t) got;
+        return got;
+    }
+
+    std::string error() { return src.error(); }
+
+private:
+    bool readAll(uint64_t size, std::string &data, std::string &err)
+    {
+        if (size > 64 * 1024 * 1024)
+        {
+            err = "Архив повреждён: слишком длинный служебный заголовок tar";
+            return false;
+        }
+        uint64_t padded = (size + kTarBlock - 1) / kTarBlock * kTarBlock;
+        data.resize((size_t) padded);
+        if (padded && src.read(&data[0], (size_t) padded) != (int64_t) padded)
+        {
+            err = "Архив повреждён: обрыв данных tar";
+            return false;
+        }
+        data.resize((size_t) size);
+        return true;
+    }
+
+    bool skipBytes(uint64_t n, std::string &err)
+    {
+        std::vector<char> buf(64 * 1024);
+        while (n > 0)
+        {
+            size_t chunk = (size_t) std::min<uint64_t>(n, buf.size());
+            int64_t got = src.read(buf.data(), chunk);
+            if (got != (int64_t) chunk)
+            {
+                err = got < 0 ? src.error() : "Архив повреждён: обрыв данных tar";
+                return false;
+            }
+            n -= chunk;
+        }
+        return true;
+    }
+
+    Source &src;
+    uint64_t remaining = 0;
+};
+
+// Сведения из заголовка gzip: исходное имя (FNAME), время и размер (ISIZE).
+struct GzHeader
+{
+    std::string name;
+    time_t mtime = 0;
+    uint64_t size = 0;
+};
+
+bool readGzHeader(const std::string &path, GzHeader &g)
+{
+    FILE *f = _wfopen(fsu::widen(path).c_str(), L"rb");
+    if (!f)
+        return false;
+    uint8_t h[10];
+    bool ok = fread(h, 1, 10, f) == 10 && h[0] == 0x1F && h[1] == 0x8B;
+    if (ok)
+    {
+        uint8_t flags = h[3];
+        g.mtime = (time_t) rd32(h + 4);
+        if (flags & 0x04)  // FEXTRA
+        {
+            uint8_t x[2];
+            if (fread(x, 1, 2, f) == 2)
+                _fseeki64(f, rd16(x), SEEK_CUR);
+        }
+        if (flags & 0x08)  // FNAME (ISO-8859-1)
+        {
+            int c;
+            while ((c = fgetc(f)) != EOF && c != 0)
+                g.name.push_back((char) c);
+        }
+        uint8_t t[4];
+        if (_fseeki64(f, -4, SEEK_END) == 0 && fread(t, 1, 4, f) == 4)
+            g.size = rd32(t);
+    }
+    fclose(f);
+    return ok;
+}
+
+// Имя файла внутри .gz: из заголовка, иначе имя архива без .gz (.tgz — .tar).
+std::string gzInnerName(const std::string &path, const GzHeader &g)
+{
+    if (!g.name.empty())
+    {
+        std::string n = fsu::isValidUtf8(g.name) ? g.name : fsu::fromCodePage(g.name, 28591);
+        n = fsu::baseName(tarName(n));
+        if (!n.empty())
+            return n;
+    }
+    std::string base = fsu::baseName(path);
+    std::string ext = fsu::upper(fsu::extension(base));
+    if (ext == "TGZ")
+        return fsu::stripExt(base) + ".tar";
+    if (ext == "GZ")
+        return fsu::stripExt(base);
+    return base + ".out";
+}
+
+bool tarRead(const std::string &path, bool gzip, CabInfo &info, std::string &err)
+{
+    Source src(path, gzip);
+    if (!src.isOpen())
+    {
+        err = "Не удалось открыть архив " + path;
+        return false;
+    }
+    TarWalker w(src);
+    uint32_t index = 0;
+    bool ok = w.walk([&](const TarEntry &e, TarWalker &) {
+        if (e.isFile() && !e.name.empty())
+        {
+            CabEntry ce;
+            ce.name = e.name;
+            ce.size = e.size;
+            toDos(e.mtime, ce.date, ce.time);
+            ce.index = index;
+            info.totalSize += ce.size;
+            info.entries.push_back(std::move(ce));
+        }
+        ++index;
+        return 0;
+    }, err);
+    info.method = gzip ? "gzip" : "Без сжатия";
+    return ok;
+}
+
+bool gzRead(const std::string &path, CabInfo &info, std::string &err)
+{
+    GzHeader g;
+    if (!readGzHeader(path, g))
+    {
+        err = "Файл не является архивом gzip";
+        return false;
+    }
+    CabEntry e;
+    e.name = gzInnerName(path, g);
+    e.size = g.size;    // размер по модулю 4 Гб, как его хранит формат
+    toDos(g.mtime, e.date, e.time);
+    info.totalSize = e.size;
+    info.entries.push_back(std::move(e));
+    info.method = "gzip";
+    return true;
+}
+
+// Запись данных в файл назначения (или проверка без записи).
+template <class ReadFn>
+bool writeTarget(ExtractJob &j, const std::string &name, uint64_t size, time_t mtime, ReadFn readFn)
+{
+    if (j.progress && !j.progress->onFile(name))
+    {
+        j.cancelled = true;
+        return false;
+    }
+    std::string out;
+    int fd = -1;
+    if (!j.test)
+    {
+        out = cabTargetPath(j.destDir, name, j.keepPaths, j.base);
+        Target t = prepareTarget(j, out, size);
+        if (t == Target::Stop)
+            return false;
+        if (t == Target::Skip)
+            return true;
+        fd = _wopen(fsu::widen(out).c_str(), _O_BINARY | _O_CREAT | _O_TRUNC | _O_WRONLY,
+                    _S_IREAD | _S_IWRITE);
+        if (fd == -1)
+        {
+            j.error = "Не удалось создать файл " + out + "\n" + fsu::lastErrorText();
+            return false;
+        }
+    }
+    std::vector<char> buf(1 << 20);
+    bool ok = true;
+    for (;;)
+    {
+        int64_t got = readFn(buf.data(), buf.size());
+        if (got < 0)
+        {
+            ok = false;
+            break;
+        }
+        if (got == 0)
+            break;
+        if (fd != -1 && _write(fd, buf.data(), (unsigned) got) != got)
+        {
+            j.error = "Ошибка записи файла " + out + "\n" + fsu::lastErrorText();
+            ok = false;
+            break;
+        }
+        j.done += (uint64_t) got;
+        if (j.progress && !j.progress->onBytes(j.done, j.total))
+        {
+            j.cancelled = true;
+            ok = false;
+            break;
+        }
+    }
+    if (fd != -1)
+        _close(fd);
+    if (!ok)
+    {
+        if (!out.empty())
+            fsu::removeFile(out);
+        return false;
+    }
+    if (!out.empty())
+    {
+        uint16_t date, time;
+        toDos(mtime, date, time);
+        applyFileInfo(out, date, time, 0);
+    }
+    ++j.result.files;
+    return true;
+}
+
+bool tarExtract(ExtractJob &j, bool gzip)
+{
+    Source src(j.path, gzip);
+    if (!src.isOpen())
+    {
+        j.error = "Не удалось открыть архив " + j.path;
+        return false;
+    }
+    TarWalker w(src);
+    std::string err;
+    bool ok = w.walk([&](const TarEntry &e, TarWalker &walker) {
+        if (e.name.empty())
+            return 0;
+        if (e.isDir())
+        {
+            if (j.all && j.keepPaths && !j.test)
+                fsu::makeDirs(cabTargetPath(j.destDir, e.name, true, j.base));
+            return 0;
+        }
+        if (!e.isFile() || !j.wants(e.name))
+            return 0;
+        bool readError = false;
+        bool written = writeTarget(j, e.name, e.size, e.mtime, [&](void *buf, size_t n) {
+            int64_t got = walker.readData(buf, n);
+            if (got < 0)
+                readError = true;
+            return got;
+        });
+        if (!written)
+        {
+            if (readError && j.error.empty() && !j.cancelled)
+                j.error = e.name + ": " + walker.error();
+            return -1;
+        }
+        return 0;
+    }, err);
+    if (!ok && j.error.empty() && !j.cancelled)
+        j.error = err;
+    return ok;
+}
+
+bool gzExtract(ExtractJob &j)
+{
+    GzHeader g;
+    readGzHeader(j.path, g);
+    std::string name = gzInnerName(j.path, g);
+    if (!j.wants(name))
+        return true;
+    Source src(j.path, true);
+    if (!src.isOpen())
+    {
+        j.error = "Не удалось открыть архив " + j.path;
+        return false;
+    }
+    bool readError = false;
+    bool ok = writeTarget(j, name, g.size, g.mtime, [&](void *buf, size_t n) {
+        int64_t got = src.read(buf, n);
+        if (got < 0)
+            readError = true;
+        return got;
+    });
+    if (!ok && readError && j.error.empty() && !j.cancelled)
+        j.error = name + ": " + src.error();
+    return ok;
+}
+
+// gzip с tar внутри: первый блок распакованных данных — заголовок tar.
+bool gzContainsTar(const std::string &path)
+{
+    Source src(path, true);
+    uint8_t h[kTarBlock];
+    return src.isOpen() && src.read(h, kTarBlock) == (int64_t) kTarBlock && tarChecksumOk(h) &&
+           !tarZeroBlock(h);
+}
+
 // ---------------------------------------------------------------------------
 
 bool runJob(ArchiveFormat format, ExtractJob &j, std::string &err, CabResult *result)
@@ -716,10 +1283,14 @@ bool runJob(ArchiveFormat format, ExtractJob &j, std::string &err, CabResult *re
         err = "Не удалось создать директорию " + j.destDir + "\n" + fsu::lastErrorText();
         return false;
     }
-    if (format == ArchiveFormat::Zip)
-        zipExtract(j);
-    else
-        rarExtract(j);
+    switch (format)
+    {
+        case ArchiveFormat::Zip:   zipExtract(j); break;
+        case ArchiveFormat::Rar:   rarExtract(j); break;
+        case ArchiveFormat::Tar:   tarExtract(j, false); break;
+        case ArchiveFormat::TarGz: tarExtract(j, true); break;
+        default:                   gzExtract(j); break;
+    }
     return finish(j, err, result);
 }
 
@@ -727,12 +1298,19 @@ bool runJob(ArchiveFormat format, ExtractJob &j, std::string &err, CabResult *re
 
 ArchiveFormat archiveFormat(const std::string &path, bool sfx)
 {
-    unsigned char sig[8] = {};
+    unsigned char sig[kTarBlock] = {};
     FILE *f = _wfopen(fsu::widen(path).c_str(), L"rb");
     if (!f)
         return ArchiveFormat::Unknown;
     size_t n = fread(sig, 1, sizeof(sig), f);
     fclose(f);
+    if (n >= 3 && sig[0] == 0x1F && sig[1] == 0x8B && sig[2] == 8)
+        return gzContainsTar(path) ? ArchiveFormat::TarGz : ArchiveFormat::Gz;
+    // tar: подпись ustar в заголовке либо, для старого формата без подписи,
+    // верная контрольная сумма первого заголовка у файла .tar.
+    if (n == kTarBlock && !tarZeroBlock(sig) && tarChecksumOk(sig) &&
+        (memcmp(sig + 257, "ustar", 5) == 0 || fsu::upper(fsu::extension(path)) == "TAR"))
+        return ArchiveFormat::Tar;
     if (n >= 4 && memcmp(sig, "MSCF", 4) == 0)
         return ArchiveFormat::Cab;
     if (n >= 4 && (memcmp(sig, "PK\x03\x04", 4) == 0 || memcmp(sig, "PK\x05\x06", 4) == 0))
@@ -751,6 +1329,9 @@ const char *formatName(ArchiveFormat format)
         case ArchiveFormat::Cab: return "CAB";
         case ArchiveFormat::Zip: return "ZIP";
         case ArchiveFormat::Rar: return "RAR";
+        case ArchiveFormat::Gz:  return "GZIP";
+        case ArchiveFormat::Tar: return "TAR";
+        case ArchiveFormat::TarGz: return "TAR.GZ";
         default:                 return "?";
     }
 }
@@ -758,7 +1339,18 @@ const char *formatName(ArchiveFormat format)
 bool hasArchiveExtension(const std::string &name)
 {
     std::string ext = fsu::upper(fsu::extension(name));
-    return ext == "CAB" || ext == "ZIP" || ext == "RAR";
+    return ext == "CAB" || ext == "ZIP" || ext == "RAR" || ext == "GZ" || ext == "TGZ" || ext == "TAR";
+}
+
+std::string archiveStem(const std::string &name)
+{
+    std::string base = fsu::baseName(name);
+    std::string ext = fsu::upper(fsu::extension(base));
+    std::string stem = fsu::stripExt(base);
+    // «.tar.gz» снимается целиком.
+    if (ext == "GZ" && fsu::upper(fsu::extension(stem)) == "TAR")
+        stem = fsu::stripExt(stem);
+    return stem.empty() ? base : stem;
 }
 
 bool archRead(const std::string &path, CabInfo &info, std::string &err)
@@ -772,17 +1364,26 @@ bool archRead(const std::string &path, CabInfo &info, std::string &err)
             break;
         case ArchiveFormat::Zip:
         case ArchiveFormat::Rar:
+        case ArchiveFormat::Gz:
+        case ArchiveFormat::Tar:
+        case ArchiveFormat::TarGz:
+        {
             info = CabInfo();
             info.path = path;
-            if (!(format == ArchiveFormat::Zip ? zipRead(path, info, err) : rarRead(path, info, err)))
+            bool ok = format == ArchiveFormat::Zip ? zipRead(path, info, err)
+                    : format == ArchiveFormat::Rar ? rarRead(path, info, err)
+                    : format == ArchiveFormat::Gz  ? gzRead(path, info, err)
+                    : tarRead(path, format == ArchiveFormat::TarGz, info, err);
+            if (!ok)
                 return false;
             info.fileSize = fsu::fileSize(path);
             break;
+        }
         default:
             if (!fsu::fileExists(path))
                 err = "Не удалось открыть файл " + path;
             else
-                err = "Файл не является архивом CAB, ZIP или RAR";
+                err = "Файл не является архивом CAB, ZIP, RAR, GZ или TAR";
             return false;
     }
     info.format = format;
