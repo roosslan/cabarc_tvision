@@ -76,7 +76,7 @@ TMenuBar *TCabineApp::initMenuBar(TRect r)
             *new TMenuItem("В~ы~ход", cmQuit, kbAltX, hcNoContext, "Alt-X") +
         *new TSubMenu("~К~оманды", kbNoKey) +
             *new TMenuItem("~Д~обавить в архив...", cmAddFiles, kbF6, hcNoContext, "F6") +
-            *new TMenuItem("~И~звлечь...", cmExtract, kbF5, hcNoContext, "F5") +
+            *new TMenuItem("~И~звлечь...", cmExtract, kbF5, hcNoContext, "F5, Alt-E") +
             *new TMenuItem("~У~далить", cmDeleteFiles, kbF8, hcNoContext, "F8, Del") +
             newLine() +
             *new TMenuItem("~П~росмотр", cmViewFile, kbF3, hcNoContext, "F3") +
@@ -113,7 +113,9 @@ TStatusLine *TCabineApp::initStatusLine(TRect r)
             *new TStatusItem("~F6~ В архив", kbF6, cmAddFiles) +
             *new TStatusItem("~F8~ Удалить", kbF8, cmDeleteFiles) +
             *new TStatusItem("~F10~ Меню", kbF10, cmMenu) +
-            *new TStatusItem(0, kbAltF3, cmClose));
+            *new TStatusItem(0, kbAltF3, cmClose) +
+            // Скрытое второе сочетание для «Извлечь».
+            *new TStatusItem(0, kbAltE, cmExtract));
 }
 
 void TCabineApp::getEvent(TEvent &event)
