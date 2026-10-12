@@ -1,0 +1,14 @@
+# Удаление директории из архива.
+#copy {DATA}\test.cab | {WORK}\panel\p.cab
+size 100 30
+run "{CABINE}" "{WORK}\panel\p.cab"
+waitfor 5000 numbers
+key Down
+key Down
+key F8
+waitfor 3000 Удалить из архива
+key Enter
+waitfor 8000 3 файла, 1 директория
+dump 08_deleted
+key Alt+X
+exit 3000

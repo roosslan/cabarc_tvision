@@ -1,0 +1,18 @@
+# Самораспаковывающийся архив: галочка в окне создания (F6 на диске).
+#copydir {DATA}\src | {WORK}\sfx\src
+size 100 30
+run "{CABINE}" "{WORK}\sfx"
+waitfor 5000 src
+key Down
+key F6
+waitfor 3000 Обзор
+key Enter
+waitfor 3000 Новый архив
+key Alt+N
+key Tab
+key Space
+key Enter
+waitfor 8000 src.exe
+key Alt+X
+exit 3000
+#expect-file {WORK}\sfx\src.exe

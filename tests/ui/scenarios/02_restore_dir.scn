@@ -1,0 +1,8 @@
+# Запуск без параметров открывает место, где программу закрыли (01: директория panel).
+size 100 30
+run "{CABINE}"
+waitfor 5000 \panel
+waitfor 3000 nest.cab
+dump 02_restored
+key Alt+X
+exit 3000

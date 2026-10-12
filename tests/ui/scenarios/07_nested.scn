@@ -1,0 +1,15 @@
+# Вложенный архив открывается как директория и закрывается обратно в родительский.
+#copy {DATA}\nest.cab | {WORK}\panel\nest.cab
+size 100 30
+run "{CABINE}" "{WORK}\panel\nest.cab"
+waitfor 5000 внутренний.cab
+key Down
+key Down
+key Enter
+waitfor 5000 Документы
+key Back
+waitfor 3000 внутренний.cab
+key Back
+waitfor 3000 nest.cab
+key Alt+X
+exit 3000

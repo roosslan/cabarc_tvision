@@ -10,3 +10,6 @@
 [submodule "third_party/unrar"]
 	path = third_party/unrar
 	url = https://github.com/aawc/unrar.git
+[submodule "third_party/7zip"]
+	path = third_party/7zip
+	url = https://github.com/ip7z/7zip.git

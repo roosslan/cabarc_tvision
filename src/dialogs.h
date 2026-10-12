@@ -91,6 +91,7 @@ struct Settings
     bool associateCab = false;      // файлы архивов открываются в Cabine
     bool associateZip = false;
     bool associateRar = false;
+    bool associate7z = false;
     bool associateTar = false;      // .tar, .tgz и .gz (в том числе .tar.gz)
     bool archivesFirst = false;     // архивы в панели выше остальных файлов
     CompressionSpec compression;    // метод сжатия новых архивов

@@ -111,6 +111,24 @@ if (MSVC)
     target_compile_options(cabine_unrar PRIVATE /W0 /EHsc)
 endif()
 
+# 7z — распаковщик на C из LZMA SDK (C/ в репозитории 7-Zip, общественное достояние):
+# LZMA, LZMA2, PPMd, BCJ/BCJ2/ARM и другие фильтры, Delta. Шифрование не поддерживается.
+if (NOT EXISTS "${THIRD_PARTY}/7zip/C/7zDec.c")
+    message(FATAL_ERROR "Не найден ${THIRD_PARTY}/7zip. Необходимо выполнить git submodule update --init.")
+endif()
+set(SZ_FILES 7zAlloc 7zArcIn 7zBuf 7zBuf2 7zCrc 7zCrcOpt 7zDec 7zFile 7zStream Bcj2 Bra Bra86
+    BraIA64 CpuArch Delta Lzma2Dec LzmaDec Ppmd7 Ppmd7Dec)
+set(SZ_SOURCES)
+foreach (f ${SZ_FILES})
+    list(APPEND SZ_SOURCES "${THIRD_PARTY}/7zip/C/${f}.c")
+endforeach()
+add_library(cabine_7z STATIC ${SZ_SOURCES})
+target_include_directories(cabine_7z PUBLIC "${THIRD_PARTY}/7zip/C")
+target_compile_definitions(cabine_7z PRIVATE Z7_PPMD_SUPPORT Z7_EXTRACT_ONLY _CRT_SECURE_NO_WARNINGS)
+if (MSVC)
+    target_compile_options(cabine_7z PRIVATE /W0)
+endif()
+
 # ---------------------------------------------------------------------------
 # Приложение
 # ---------------------------------------------------------------------------
@@ -132,7 +150,7 @@ add_executable(cabine
 )
 target_compile_features(cabine PRIVATE cxx_std_17)
 target_compile_definitions(cabine PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(cabine PRIVATE tvision cabine_minizip cabine_unrar cabinet shell32 ole32 user32 advapi32)
+target_link_libraries(cabine PRIVATE tvision cabine_minizip cabine_unrar cabine_7z cabinet shell32 ole32 user32 advapi32)
 if (MSVC)
     target_compile_options(cabine PRIVATE /W3)
 endif()
@@ -196,10 +214,22 @@ if (CABINE_TESTS)
     target_compile_definitions(cabine-tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS
         "CABINE_SFX_STUB=\"$<TARGET_FILE:cabine-sfx>\""
         "CABINE_TEST_DATA=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/data\"")
-    target_link_libraries(cabine-tests PRIVATE cabine_minizip cabine_unrar cabinet shell32 ole32 user32 advapi32)
+    target_link_libraries(cabine-tests PRIVATE cabine_minizip cabine_unrar cabine_7z cabinet shell32 ole32 user32 advapi32)
     if (MSVC)
         target_compile_options(cabine-tests PRIVATE /W3 /utf-8)
     endif()
     add_dependencies(cabine-tests cabine-sfx)
     add_test(NAME engine COMMAND cabine-tests)
+
+    # Тесты интерфейса: драйвер ConPTY и сценарии tests/ui/scenarios.
+    add_executable(cabine-uidriver tests/ui/driver.cpp)
+    target_compile_features(cabine-uidriver PRIVATE cxx_std_17)
+    target_compile_definitions(cabine-uidriver PRIVATE _CRT_SECURE_NO_WARNINGS)
+    if (MSVC)
+        target_compile_options(cabine-uidriver PRIVATE /W3 /utf-8)
+    endif()
+    add_test(NAME ui
+        COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/ui/run.ps1" -Bin "$<TARGET_FILE_DIR:cabine>")
+    set_tests_properties(ui PROPERTIES TIMEOUT 900)
 endif()

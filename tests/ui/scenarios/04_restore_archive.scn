@@ -1,0 +1,7 @@
+# Запуск без параметров открывает директорию внутри архива, где программу закрыли.
+size 100 30
+run "{CABINE}"
+waitfor 5000 file10.txt
+dump 04_restored
+key Alt+X
+exit 3000

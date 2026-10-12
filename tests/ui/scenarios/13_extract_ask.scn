@@ -1,0 +1,14 @@
+# -ei: окно «Извлечь» с предложенной директорией и кнопкой «Обзор...».
+#copy {TESTDATA}\sample5.rar | {WORK}\batch\ei\r.rar
+size 100 30
+run "{CABINE}" -ei "{WORK}\batch\ei\r.rar"
+waitfor 5000 Извлечь в
+waitfor 3000 ei\r
+key Alt+J
+waitfor 3000 Выбор директории
+key Esc
+wait 500
+key Enter
+waitfor 8000 Готово
+exit 5000
+#expect-same {DATA}\src | {WORK}\batch\ei\r

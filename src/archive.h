@@ -7,7 +7,7 @@
 #include "cabfile.h"
 
 // Архивы любого поддерживаемого формата: CAB (Cabinet API, чтение и запись),
-// ZIP (minizip-ng), RAR (UnRAR), GZ, TAR и TAR.GZ (zlib и собственный разбор
+// ZIP (minizip-ng), RAR (UnRAR), 7Z (LZMA SDK), GZ, TAR и TAR.GZ (zlib и собственный разбор
 // tar) — только просмотр, проверка и распаковка.
 // Формат определяется по сигнатуре, а не по расширению.
 
@@ -18,7 +18,7 @@ inline bool isArchive(const std::string &path, bool sfx = false)
 }
 const char *formatName(ArchiveFormat format);
 
-// Расширения файлов архивов (без учёта регистра): .cab, .zip, .rar, .gz, .tgz, .tar.
+// Расширения файлов архивов (без учёта регистра): .cab, .zip, .rar, .7z, .gz, .tgz, .tar.
 bool hasArchiveExtension(const std::string &name);
 // Имя архива без расширения: «отчёт.zip» — «отчёт», «src.tar.gz» — «src».
 std::string archiveStem(const std::string &name);

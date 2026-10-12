@@ -1,0 +1,7 @@
+# -a: добавление директории в архив рядом с ней (окно хода, «Готово»).
+#copydir {DATA}\src | {WORK}\batch\proj
+size 100 30
+run "{CABINE}" -a "{WORK}\batch\proj"
+waitfor 8000 Готово
+exit 5000
+#expect-file {WORK}\batch\proj.cab

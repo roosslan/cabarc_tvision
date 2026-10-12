@@ -255,7 +255,7 @@ void TCabineApp::newArchive()
 void TCabineApp::openArchiveDialog()
 {
     std::string path;
-    if (chooseFile("Открыть архив", "*.cab;*.zip;*.rar;*.gz;*.tgz;*.tar", false, path))
+    if (chooseFile("Открыть архив", "*.cab;*.zip;*.rar;*.7z;*.gz;*.tgz;*.tar", false, path))
         openPath(path);
 }
 
@@ -265,6 +265,7 @@ void TCabineApp::options()
     s.associateCab = isAssociated("cab");
     s.associateZip = isAssociated("zip");
     s.associateRar = isAssociated("rar");
+    s.associate7z = isAssociated("7z");
     s.associateTar = isAssociated("tar") && isAssociated("tgz") && isAssociated("gz");
     s.archivesFirst = panel ? panel->archivesFirst : fsu::loadSetting("ArchivesFirst", "0") == "1";
     s.compression = defaultCompression;
@@ -286,6 +287,7 @@ void TCabineApp::options()
         {"cab", s.associateCab, was.associateCab},
         {"zip", s.associateZip, was.associateZip},
         {"rar", s.associateRar, was.associateRar},
+        {"7z", s.associate7z, was.associate7z},
         {"tar", s.associateTar, was.associateTar},
         {"tgz", s.associateTar, was.associateTar},
         {"gz", s.associateTar, was.associateTar},

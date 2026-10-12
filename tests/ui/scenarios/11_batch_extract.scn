@@ -1,0 +1,7 @@
+# -x: распаковка архива в его же директорию.
+#copy {DATA}\test.cab | {WORK}\batch\x\small.cab
+size 100 30
+run "{CABINE}" -x "{WORK}\batch\x\small.cab"
+waitfor 8000 Готово
+exit 5000
+#expect-file {WORK}\batch\x\numbers\file10.txt

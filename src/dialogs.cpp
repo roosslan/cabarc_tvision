@@ -1187,27 +1187,28 @@ bool sfxDialog(const std::string &about, ExtractOptions &opt)
 
 bool settingsDialog(Settings &s)
 {
-    TDialog *d = new TDialog(TRect(0, 0, 56, 16), "Параметры");
+    TDialog *d = new TDialog(TRect(0, 0, 56, 17), "Параметры");
     d->options |= ofCentered;
-    TCheckBoxes *general = new TCheckBoxes(TRect(3, 3, 53, 8),
+    TCheckBoxes *general = new TCheckBoxes(TRect(3, 3, 53, 9),
         new TSItem("Ассоциировать файлы CAB с Cabine",
         new TSItem("Ассоциировать файлы ZIP с Cabine",
         new TSItem("Ассоциировать файлы RAR с Cabine",
+        new TSItem("Ассоциировать файлы 7Z с Cabine",
         new TSItem("Ассоциировать файлы TAR, TGZ и GZ с Cabine",
-        new TSItem("Показывать архивы первыми", nullptr))))));
+        new TSItem("Показывать архивы первыми", nullptr)))))));
     d->insert(general);
     d->insert(new TLabel(TRect(2, 2, 30, 3), "~О~бщие:", general));
     setClusterValue(general, (s.associateCab ? 1 : 0) | (s.associateZip ? 2 : 0) |
-                             (s.associateRar ? 4 : 0) | (s.associateTar ? 8 : 0) |
-                             (s.archivesFirst ? 16 : 0));
+                             (s.associateRar ? 4 : 0) | (s.associate7z ? 8 : 0) |
+                             (s.associateTar ? 16 : 0) | (s.archivesFirst ? 32 : 0));
 
-    TComboBox *level = new TComboBox(TRect(3, 10, 30, 11), compressionLevels(),
+    TComboBox *level = new TComboBox(TRect(3, 11, 30, 12), compressionLevels(),
                                      compressionLevel(s.compression));
     d->insert(level);
-    d->insert(new TLabel(TRect(2, 9, 40, 10), "~С~жатие новых архивов:", level));
+    d->insert(new TLabel(TRect(2, 10, 40, 11), "~С~жатие новых архивов:", level));
 
-    d->insert(new TButton(TRect(15, 13, 27, 15), "O~K~", cmOK, bfDefault));
-    d->insert(new TButton(TRect(29, 13, 41, 15), "Отмена", cmCancel, bfNormal));
+    d->insert(new TButton(TRect(15, 14, 27, 16), "O~K~", cmOK, bfDefault));
+    d->insert(new TButton(TRect(29, 14, 41, 16), "Отмена", cmCancel, bfNormal));
     d->selectNext(False);
     ushort r = TProgram::deskTop->execView(d);
     if (r == cmOK)
@@ -1216,8 +1217,9 @@ bool settingsDialog(Settings &s)
         s.associateCab = (g & 1) != 0;
         s.associateZip = (g & 2) != 0;
         s.associateRar = (g & 4) != 0;
-        s.associateTar = (g & 8) != 0;
-        s.archivesFirst = (g & 16) != 0;
+        s.associate7z = (g & 8) != 0;
+        s.associateTar = (g & 16) != 0;
+        s.archivesFirst = (g & 32) != 0;
         s.compression = compressionOfLevel(level->current());
     }
     TObject::destroy(d);

@@ -1,0 +1,9 @@
+# Запуск самораспаковывающегося архива: окно Turbo Vision, распаковка, «Готово».
+size 100 30
+run "{WORK}\sfx\src.exe"
+waitfor 5000 Самораспаковывающийся
+type {WORK}\sfx\out
+key Enter
+waitfor 8000 Готово
+exit 5000
+#expect-same {DATA}\src | {WORK}\sfx\out\src
