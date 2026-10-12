@@ -61,3 +61,16 @@ bool confirmVolumes(const std::string &firstVolume, uint64_t volumeSize)
     return confirm("Рядом уже есть тома с такими же именами (" + fsu::baseName(second) +
                    " и следующие).\nОни будут заменены. Продолжить?");
 }
+
+bool confirmChangedTarget(const std::string &original, const std::string &target)
+{
+    if (fsu::upper(original) == fsu::upper(target))
+        return true;
+    if (fsu::dirExists(target))
+    {
+        showError("Существует директория с таким именем\n" + target);
+        return false;
+    }
+    return !fsu::fileExists(target) ||
+           confirm("Файл уже существует:\n" + target + "\n\nЗаменить его новым архивом?");
+}

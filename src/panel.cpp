@@ -1278,9 +1278,17 @@ void TPanelWindow::addFiles()
         opt.compression = existing.compression;
     opt.allowSfx = !exists;
     opt.sfx = !exists && fsu::upper(fsu::extension(archivePath)) == "EXE";
+    if (!exists)
+        opt.archivePath = archivePath;
 
     if (!addFilesDialog(exists ? "Добавить в архив" : "Новый архив", opt))
         return;
+    if (!exists)
+    {
+        if (!confirmChangedTarget(archivePath, opt.archivePath))
+            return;
+        archivePath = opt.archivePath;
+    }
     std::string stub;
     if (opt.sfx && !prepareSfx(archivePath, stub))
         return;

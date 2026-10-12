@@ -17,3 +17,7 @@ bool prepareSfx(std::string &path, std::string &stub);
 // Многотомный архив: если рядом уже есть файлы томов (<имя>2.cab...),
 // спрашивает, заменять ли их. Без томов (volumeSize == 0) — true.
 bool confirmVolumes(const std::string &firstVolume, uint64_t volumeSize);
+
+// Имя архива изменилось в окне (галочка SFX сменила расширение): если файл
+// с новым именем уже есть, спрашивает, заменять ли его.
+bool confirmChangedTarget(const std::string &original, const std::string &target);

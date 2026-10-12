@@ -57,6 +57,9 @@ struct AddOptions
     std::string prefix;
     CompressionSpec compression;
     bool allowSfx = false;  // новый архив: показывать размер тома и выбор SFX
+    // Путь нового архива: показывается в окне, его расширение меняется вместе
+    // с галочкой SFX (.cab ↔ .exe); после закрытия окна — итоговый путь.
+    std::string archivePath;
     bool sfx = false;
     uint64_t volumeSize = 0;    // 0 — один файл
 };

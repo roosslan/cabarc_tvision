@@ -8,9 +8,13 @@ key F6
 waitfor 3000 Обзор
 key Enter
 waitfor 3000 Новый архив
+waitfor 3000 Будет создан:
+waitfor 3000 src.cab
 key Alt+N
 key Tab
 key Space
+waitfor 3000 src.exe
+dump 20_add_dlg
 key Enter
 waitfor 8000 src.exe
 key Alt+X

@@ -234,8 +234,12 @@ void TCabineApp::newArchive()
     opt.compression = defaultCompression;
     opt.allowSfx = true;
     opt.sfx = fsu::upper(fsu::extension(path)) == "EXE";
+    opt.archivePath = path;
     if (!addFilesDialog("Новый архив", opt))
         return;
+    if (!confirmChangedTarget(path, opt.archivePath))
+        return;
+    path = opt.archivePath;
     std::string stub;
     if (opt.sfx && !prepareSfx(path, stub))
         return;
