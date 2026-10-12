@@ -338,6 +338,45 @@ ushort messageBoxFit(const std::string &msg, ushort options)
 // Виды для окна хода выполнения
 // ---------------------------------------------------------------------------
 
+// Расширение архива при переключении галочки SFX: .cab (или без расширения) — .exe
+// и обратно, .exe — .cab. Другие расширения не меняются.
+std::string sfxExtension(const std::string &path, bool sfx)
+{
+    if (path.empty())
+        return path;
+    std::string ext = fsu::upper(fsu::extension(path));
+    if (sfx && (ext == "CAB" || ext.empty()))
+        return fsu::stripExt(path) + ".exe";
+    if (!sfx && ext == "EXE")
+        return fsu::stripExt(path) + ".cab";
+    return path;
+}
+
+// Галочка «Создать самораспаковывающийся архив»: о переключении сообщает окну.
+class TSfxCheckBox : public TCheckBoxes
+{
+public:
+    TSfxCheckBox(const TRect &bounds, bool checked) :
+        TCheckBoxes(bounds, new TSItem("Создать самораспаковывающийся архив (EXE)", nullptr))
+    {
+        ushort v = checked ? 1 : 0;
+        setData(&v);
+    }
+
+    bool checked()
+    {
+        ushort v = 0;
+        getData(&v);
+        return (v & 1) != 0;
+    }
+
+    void press(int item) override
+    {
+        TCheckBoxes::press(item);
+        message(owner, evBroadcast, cmSfxToggled, this);
+    }
+};
+
 class TTextLine : public TView
 {
 public:
@@ -902,12 +941,20 @@ private:
     TComboBox *level;
     TInputLine *volume = nullptr;
     TInputLine *prefix;
-    TCheckBoxes *sfx = nullptr;
+    TSfxCheckBox *sfx = nullptr;
+    TTextLine *target = nullptr;
+    std::string targetPath;
+
+    void showTarget()
+    {
+        if (target)
+            target->setText(targetPath);
+    }
 };
 
 TAddDialog::TAddDialog(const char *title, AddOptions &opt) :
     TWindowInit(&TDialog::initFrame),
-    TDialog(TRect(0, 0, 70, opt.allowSfx ? 23 : 21), title),
+    TDialog(TRect(0, 0, 70, !opt.allowSfx ? 21 : opt.archivePath.empty() ? 23 : 24), title),
     opt(opt),
     items(opt.items)
 {
@@ -946,11 +993,19 @@ TAddDialog::TAddDialog(const char *title, AddOptions &opt) :
     {
         volume = insertVolumeField(this, 39, 13, "Размер ~т~ома:");
         setInputText(volume, opt.volumeSize ? formatSize(opt.volumeSize) : "Не делить");
-        sfx = new TCheckBoxes(TRect(3, 18, 67, 19),
-            new TSItem("Создать самораспаковывающийся архив (EXE)", nullptr));
+        sfx = new TSfxCheckBox(TRect(3, 18, 67, 19), opt.sfx);
         insert(sfx);
-        setClusterValue(sfx, opt.sfx ? 1 : 0);
         y = 20;
+        // Имя создаваемого архива: расширение меняется вместе с галочкой.
+        if (!opt.archivePath.empty())
+        {
+            targetPath = sfxExtension(opt.archivePath, opt.sfx);
+            insert(new TStaticText(TRect(3, 19, 17, 20), "Будет создан:"));
+            target = new TTextLine(TRect(17, 19, 67, 20));
+            insert(target);
+            showTarget();
+            y = 21;
+        }
     }
 
     insert(new TButton(TRect(22, y, 34, y + 2), "O~K~", cmOK, bfDefault));
@@ -973,6 +1028,13 @@ void TAddDialog::addItem(const std::string &item)
 void TAddDialog::handleEvent(TEvent &ev)
 {
     TDialog::handleEvent(ev);
+    if (ev.what == evBroadcast && ev.message.command == cmSfxToggled && sfx)
+    {
+        targetPath = sfxExtension(targetPath, sfx->checked());
+        showTarget();
+        clearEvent(ev);
+        return;
+    }
     if (ev.what != evCommand)
         return;
     switch (ev.message.command)
@@ -1029,7 +1091,9 @@ Boolean TAddDialog::valid(ushort command)
         opt.keepPaths = (f & 2) != 0;
         opt.prefix = prefix->data;
         opt.compression = compressionOfLevel(level->current());
-        opt.sfx = sfx && (clusterValue(sfx) & 1) != 0;
+        opt.sfx = sfx && sfx->checked();
+        if (target)
+            opt.archivePath = targetPath;
         opt.volumeSize = 0;
         if (volume && !readVolumeField(volume, opt.volumeSize))
             return False;
@@ -1187,27 +1251,28 @@ bool sfxDialog(const std::string &about, ExtractOptions &opt)
 
 bool settingsDialog(Settings &s)
 {
-    TDialog *d = new TDialog(TRect(0, 0, 56, 16), "Параметры");
+    TDialog *d = new TDialog(TRect(0, 0, 56, 17), "Параметры");
     d->options |= ofCentered;
-    TCheckBoxes *general = new TCheckBoxes(TRect(3, 3, 53, 8),
+    TCheckBoxes *general = new TCheckBoxes(TRect(3, 3, 53, 9),
         new TSItem("Ассоциировать файлы CAB с Cabine",
         new TSItem("Ассоциировать файлы ZIP с Cabine",
         new TSItem("Ассоциировать файлы RAR с Cabine",
+        new TSItem("Ассоциировать файлы 7Z с Cabine",
         new TSItem("Ассоциировать файлы TAR, TGZ и GZ с Cabine",
-        new TSItem("Показывать архивы первыми", nullptr))))));
+        new TSItem("Показывать архивы первыми", nullptr)))))));
     d->insert(general);
     d->insert(new TLabel(TRect(2, 2, 30, 3), "~О~бщие:", general));
     setClusterValue(general, (s.associateCab ? 1 : 0) | (s.associateZip ? 2 : 0) |
-                             (s.associateRar ? 4 : 0) | (s.associateTar ? 8 : 0) |
-                             (s.archivesFirst ? 16 : 0));
+                             (s.associateRar ? 4 : 0) | (s.associate7z ? 8 : 0) |
+                             (s.associateTar ? 16 : 0) | (s.archivesFirst ? 32 : 0));
 
-    TComboBox *level = new TComboBox(TRect(3, 10, 30, 11), compressionLevels(),
+    TComboBox *level = new TComboBox(TRect(3, 11, 30, 12), compressionLevels(),
                                      compressionLevel(s.compression));
     d->insert(level);
-    d->insert(new TLabel(TRect(2, 9, 40, 10), "~С~жатие новых архивов:", level));
+    d->insert(new TLabel(TRect(2, 10, 40, 11), "~С~жатие новых архивов:", level));
 
-    d->insert(new TButton(TRect(15, 13, 27, 15), "O~K~", cmOK, bfDefault));
-    d->insert(new TButton(TRect(29, 13, 41, 15), "Отмена", cmCancel, bfNormal));
+    d->insert(new TButton(TRect(15, 14, 27, 16), "O~K~", cmOK, bfDefault));
+    d->insert(new TButton(TRect(29, 14, 41, 16), "Отмена", cmCancel, bfNormal));
     d->selectNext(False);
     ushort r = TProgram::deskTop->execView(d);
     if (r == cmOK)
@@ -1216,8 +1281,9 @@ bool settingsDialog(Settings &s)
         s.associateCab = (g & 1) != 0;
         s.associateZip = (g & 2) != 0;
         s.associateRar = (g & 4) != 0;
-        s.associateTar = (g & 8) != 0;
-        s.archivesFirst = (g & 16) != 0;
+        s.associate7z = (g & 8) != 0;
+        s.associateTar = (g & 16) != 0;
+        s.archivesFirst = (g & 32) != 0;
         s.compression = compressionOfLevel(level->current());
     }
     TObject::destroy(d);
@@ -1353,11 +1419,21 @@ public:
         insert(new TLabel(TRect(2, 5, 28, 6), "Сжати~е~:", level));
         volume = insertVolumeField(this, 35, 5, "Размер ~т~ома:");
         setInputText(volume, t.volumeSize ? formatSize(t.volumeSize) : "Не делить");
-        sfx = new TCheckBoxes(TRect(3, 8, 69, 9),
-            new TSItem("Создать самораспаковывающийся архив (EXE)", nullptr));
+        sfx = new TSfxCheckBox(TRect(3, 8, 69, 9), t.sfx);
         insert(sfx);
-        setClusterValue(sfx, t.sfx ? 1 : 0);
         addButtons();
+    }
+
+    void handleEvent(TEvent &ev) override
+    {
+        TPathDialog::handleEvent(ev);
+        // Галочка SFX меняет расширение в строке пути: .cab ↔ .exe.
+        if (ev.what == evBroadcast && ev.message.command == cmSfxToggled)
+        {
+            setInputText(input, sfxExtension(input->data, sfx->checked()));
+            input->drawView();
+            clearEvent(ev);
+        }
     }
 
     Boolean valid(ushort command) override
@@ -1368,7 +1444,7 @@ public:
             if (t.path.empty())
                 return False;
             t.compression = compressionOfLevel(level->current());
-            t.sfx = (clusterValue(sfx) & 1) != 0;
+            t.sfx = sfx->checked();
             if (!readVolumeField(volume, t.volumeSize))
                 return False;
         }
@@ -1379,7 +1455,7 @@ private:
     ArchiveTarget &t;
     TComboBox *level;
     TInputLine *volume;
-    TCheckBoxes *sfx;
+    TSfxCheckBox *sfx;
 };
 
 } // namespace

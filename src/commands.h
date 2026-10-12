@@ -42,4 +42,5 @@ enum : unsigned short
 
     // Уведомления.
     cmMarksChanged  = 150,
+    cmSfxToggled,           // переключена галочка «Создать самораспаковывающийся архив»
 };

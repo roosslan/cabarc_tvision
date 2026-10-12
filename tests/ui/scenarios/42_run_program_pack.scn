@@ -1,0 +1,7 @@
+# Подготовка для 43: архив с программой и соседними файлами.
+#copydir {DATA}\exetest | {WORK}\run\exetest
+size 100 30
+run "{CABINE}" -a "{WORK}\run\exetest"
+waitfor 8000 Готово
+exit 5000
+#expect-file {WORK}\run\exetest.cab

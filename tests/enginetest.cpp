@@ -828,6 +828,69 @@ void testTarGz(const std::string &root, const std::string &big)
         fsu::printConsole("пропущено: нет tar.exe\n");
 }
 
+void test7z(const std::string &root)
+{
+    section("7z");
+    std::string data = CABINE_TEST_DATA;
+    std::string dir = fsu::joinPath(root, "7z");
+    std::string err;
+    CabResult res;
+    std::string bin;
+    for (int k = 0; k < 4; ++k)
+        for (int i = 0; i < 256; ++i)
+            bin += (char) i;
+
+    // Образцы созданы 7zr.exe из исходников 7-Zip (тот же набор файлов, что у RAR).
+    struct { const char *file; const char *what; } samples[] = {
+        {"sample.7z", "solid LZMA2"},
+        {"bcj.7z", "BCJ + LZMA"},
+        {"delta.7z", "Delta + LZMA2"},
+    };
+    for (auto &s : samples)
+    {
+        std::string path = fsu::joinPath(data, s.file);
+        std::string what = std::string(s.file) + " (" + s.what + ")";
+        check(archiveFormat(path) == ArchiveFormat::SevenZip, what + ": формат 7Z");
+        CabInfo info;
+        bool ok = archRead(path, info, err);
+        check(ok && info.entries.size() == 3 && info.format == ArchiveFormat::SevenZip, what + ": 3 файла " + err);
+        check(hasEntry(info, "Документ.txt") && hasEntry(info, "sub\\Вложенный\\data.bin"), what + ": имена");
+        ok = archTest(path, nullptr, err, &res);
+        check(ok && res.files == 3, what + ": проверка " + err);
+        std::string out = fsu::joinPath(dir, s.file);
+        ok = archExtract(path, out, {}, true, Overwrite::Always, nullptr, err, &res);
+        check(ok && res.files == 3 && readFile(fsu::joinPath(out, "readme.txt")) == "Hello, RAR!\r\n" &&
+              readFile(fsu::joinPath(out, "Документ.txt")) == "Привет, RAR!" &&
+              readFile(fsu::joinPath(out, "sub\\Вложенный\\data.bin")) == bin,
+              what + ": содержимое " + err);
+    }
+
+    std::string sample = fsu::joinPath(data, "sample.7z");
+    std::string based = fsu::joinPath(dir, "based");
+    bool ok = archExtract(sample, based, {"sub\\Вложенный\\data.bin"}, true, Overwrite::Always, nullptr, err,
+                          &res, "sub");
+    check(ok && res.files == 1 && readFile(fsu::joinPath(based, "Вложенный\\data.bin")) == bin,
+          "выбранный файл из solid-блока с путём относительно директории архива");
+
+    std::string out = fsu::joinPath(dir, "sample.7z");
+    writeFile(fsu::joinPath(out, "readme.txt"), "local");
+    ok = archExtract(sample, out, {"readme.txt"}, true, Overwrite::Never, nullptr, err, &res);
+    check(ok && res.skipped == 1 && readFile(fsu::joinPath(out, "readme.txt")) == "local",
+          "без перезаписи существующий файл не тронут");
+
+    // Шифрование не поддерживается: понятные сообщения.
+    CabInfo info;
+    std::string secret = fsu::joinPath(data, "secret.7z");
+    ok = archRead(secret, info, err);
+    check(ok && info.entries.size() == 3, "список 7z с паролем на данные читается");
+    ok = archExtract(secret, fsu::joinPath(dir, "secret"), {}, true, Overwrite::Always, nullptr, err);
+    check(!ok && err.find("парол") != std::string::npos, "распаковка 7z с паролем — сообщение: " + err);
+    ok = archRead(fsu::joinPath(data, "secrethdr.7z"), info, err);
+    check(!ok && err.find("парол") != std::string::npos, "7z с зашифрованными заголовками — сообщение: " + err);
+
+    check(hasArchiveExtension("a.7Z") && archiveStem("архив.7z") == "архив", "расширение .7z");
+}
+
 void testDetection(const std::string &root)
 {
     section("Определение формата");
@@ -838,7 +901,7 @@ void testDetection(const std::string &root)
     std::string err;
     check(!archRead(txt, info, err), "archRead отвергает не-архив: " + err);
     check(archiveFormat(fsu::joinPath(root, "mszip.cab")) == ArchiveFormat::Cab, "CAB по сигнатуре");
-    check(hasArchiveExtension("a.ZIP") && hasArchiveExtension("b.rar") && !hasArchiveExtension("c.7z"),
+    check(hasArchiveExtension("a.ZIP") && hasArchiveExtension("b.rar") && !hasArchiveExtension("c.arj"),
           "расширения архивов");
 }
 
@@ -891,6 +954,7 @@ int main()
     testZip(root, big);
     testRar(root);
     testTarGz(root, big);
+    test7z(root);
     testDetection(root);
 
     fsu::printConsole("\nПроверок: " + std::to_string(checks) + ", ошибок: " + std::to_string(failures) + "\n");

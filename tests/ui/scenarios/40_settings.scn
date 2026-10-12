@@ -1,0 +1,13 @@
+# Окно «Параметры»: ассоциации и степень сжатия.
+size 100 30
+run "{CABINE}" "{WORK}\panel"
+waitfor 5000 nest.cab
+key Alt+Y
+key Enter
+waitfor 3000 Параметры
+waitfor 3000 Ассоциировать файлы 7Z
+waitfor 3000 Ассоциировать файлы TAR, TGZ и GZ
+waitfor 3000 Максимальное (LZX:21)
+key Esc
+key Alt+X
+exit 3000

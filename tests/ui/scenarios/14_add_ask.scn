@@ -1,0 +1,17 @@
+# -ai: окно «Добавить в архив»: имя, степень сжатия, размер тома, SFX.
+#copydir {DATA}\src | {WORK}\batch\ai\src
+#random {WORK}\batch\ai\src\random.bin | 300000
+size 100 30
+run "{CABINE}" -ai "{WORK}\batch\ai\src"
+waitfor 5000 Архив:
+waitfor 3000 Размер тома
+key Alt+F
+type {WORK}\batch\ai\multi.cab
+key Alt+N
+type 128 Кб
+key Enter
+waitfor 15000 Готово
+exit 5000
+#expect-file {WORK}\batch\ai\multi.cab
+#expect-file {WORK}\batch\ai\multi2.cab
+#expect-file {WORK}\batch\ai\multi3.cab

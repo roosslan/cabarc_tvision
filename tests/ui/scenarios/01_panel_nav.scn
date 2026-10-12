@@ -1,0 +1,24 @@
+# Навигация: архив, вложенные директории, выход на диск с курсором на архиве.
+#copy {DATA}\test.cab | {WORK}\panel\p.cab
+#copy {DATA}\nest.cab | {WORK}\panel\nest.cab
+size 100 30
+run "{CABINE}" "{WORK}\panel\p.cab"
+waitfor 5000 numbers
+key Down
+key Down
+key Enter
+waitfor 3000 Вложенная
+key Down
+key Enter
+waitfor 3000 файл.txt
+key Back
+waitfor 3000 Вложенная
+key Home
+key Enter
+wait 300
+key Home
+key Enter
+waitfor 3000 nest.cab
+dump 01_fs
+key Alt+X
+exit 3000

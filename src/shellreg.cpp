@@ -10,7 +10,7 @@ const wchar_t *const kRoot = L"Software\\Classes\\";
 
 // Подменю «Cabine» для всех файлов и директорий. Порядок пунктов задаётся
 // именами разделов; пункты для архива показываются только у файлов .cab,
-// .zip, .rar, .gz (в том числе .tar.gz), .tgz и .tar.
+// .zip, .rar, .7z, .gz (в том числе .tar.gz), .tgz и .tar.
 const wchar_t *const kMenuKey = L"AllFilesystemObjects\\shell\\Cabine";
 const wchar_t *const kOpenKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\01open";
 const wchar_t *const kExtractKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\02extract";
@@ -19,7 +19,8 @@ const wchar_t *const kAddKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\04a
 const wchar_t *const kAddToKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\05addto";
 const wchar_t *const kOnlyArchives =
     L"System.FileExtension:=.cab OR System.FileExtension:=.zip OR System.FileExtension:=.rar OR "
-    L"System.FileExtension:=.gz OR System.FileExtension:=.tgz OR System.FileExtension:=.tar";
+    L"System.FileExtension:=.7z OR System.FileExtension:=.gz OR System.FileExtension:=.tgz OR "
+    L"System.FileExtension:=.tar";
 
 // Отдельные пункты прежних версий: удаляются при регистрации и её отмене.
 const wchar_t *const kLegacyKeys[] = {

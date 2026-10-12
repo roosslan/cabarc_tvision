@@ -1,0 +1,21 @@
+# Окно «Добавить в архив ...»: галочка SFX меняет расширение в строке пути (.cab ↔ .exe).
+#copydir {DATA}\src | {WORK}\batch\sx\src
+size 100 30
+run "{CABINE}" -ai "{WORK}\batch\sx\src"
+waitfor 5000 src.cab
+key Tab
+key Tab
+key Tab
+key Tab
+key Space
+waitfor 3000 src.exe
+dump 15_on
+key Space
+waitfor 3000 src.cab
+dump 15_off
+key Space
+waitfor 3000 src.exe
+key Enter
+waitfor 8000 Готово
+exit 5000
+#expect-file {WORK}\batch\sx\src.exe

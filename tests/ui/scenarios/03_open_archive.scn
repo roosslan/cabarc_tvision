@@ -1,0 +1,10 @@
+# Закрытие внутри архива (для 04).
+#copy {DATA}\test.cab | {WORK}\panel\p.cab
+size 100 30
+run "{CABINE}" "{WORK}\panel\p.cab"
+waitfor 5000 numbers
+key Down
+key Enter
+waitfor 3000 file10.txt
+key Alt+X
+exit 3000

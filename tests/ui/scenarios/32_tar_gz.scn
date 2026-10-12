@@ -1,0 +1,19 @@
+# TAR.GZ, созданный системным tar.exe: вход, просмотр файла (F3), свойства.
+#targz {DATA} | src | {WORK}\tgz\proj.tar.gz
+size 100 30
+run "{CABINE}" "{WORK}\tgz\proj.tar.gz"
+waitfor 5000 src
+key Down
+key Enter
+waitfor 3000 readme.txt
+key Down
+key Down
+key F3
+waitfor 3000 Hello, RAR!
+key Esc
+wait 500
+key Alt+I
+waitfor 3000 TAR.GZ
+key Enter
+key Alt+X
+exit 3000

@@ -623,11 +623,20 @@ bool recycle(const std::vector<std::string> &paths, std::string &err)
 
 static std::wstring settingsFile()
 {
+    // Директорию настроек можно задать переменной CABINE_SETTINGS_DIR
+    // (так тесты интерфейса не трогают настройки пользователя).
     wchar_t buf[MAX_PATH];
-    DWORD n = GetEnvironmentVariableW(L"APPDATA", buf, MAX_PATH);
-    if (n == 0 || n >= MAX_PATH)
-        return {};
-    std::string dir = joinPath(narrow(buf), "Cabine");
+    std::string dir;
+    DWORD n = GetEnvironmentVariableW(L"CABINE_SETTINGS_DIR", buf, MAX_PATH);
+    if (n > 0 && n < MAX_PATH)
+        dir = narrow(buf);
+    else
+    {
+        n = GetEnvironmentVariableW(L"APPDATA", buf, MAX_PATH);
+        if (n == 0 || n >= MAX_PATH)
+            return {};
+        dir = joinPath(narrow(buf), "Cabine");
+    }
     makeDirs(dir);
     std::string ini = joinPath(dir, "cabine.ini");
     if (!fileExists(ini))

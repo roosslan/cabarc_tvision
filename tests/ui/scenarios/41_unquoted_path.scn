@@ -1,0 +1,8 @@
+# Путь с пробелами без кавычек: Windows делит его на части, Cabine склеивает.
+#copy {DATA}\test.cab | {WORK}\sp\dru-xrpc (1).cab
+size 100 30
+run "{CABINE}" {WORK}\sp\dru-xrpc (1).cab
+waitfor 5000 numbers
+waitfor 3000 dru-xrpc (1).cab
+key Alt+X
+exit 3000

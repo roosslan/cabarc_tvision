@@ -1,0 +1,21 @@
+# 7z: просмотр, свойства, запрет изменения, распаковка всего архива (F5 на «..»).
+#copy {TESTDATA}\sample.7z | {WORK}\7z\sample.7z
+size 100 30
+run "{CABINE}" "{WORK}\7z\sample.7z"
+waitfor 5000 Документ.txt
+key Alt+I
+waitfor 3000 Формат:           7Z
+key Enter
+key End
+key F8
+waitfor 3000 только для просмотра
+key Enter
+key Home
+key F5
+waitfor 3000 Извлечь файлы
+type {WORK}\7z\out
+key Enter
+wait 1500
+key Alt+X
+exit 3000
+#expect-same {DATA}\src | {WORK}\7z\out

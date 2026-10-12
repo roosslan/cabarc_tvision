@@ -1,0 +1,27 @@
+# Многотомный самораспаковывающийся архив: степень сжатия из списка, том 100 Кб.
+#copydir {DATA}\src | {WORK}\vol\src
+#random {WORK}\vol\src\random.bin | 300000
+size 100 30
+run "{CABINE}" "{WORK}\vol"
+waitfor 5000 src
+key Down
+key F6
+waitfor 3000 Обзор
+key Enter
+waitfor 3000 Новый архив
+key Alt+T
+key Down
+waitfor 3000 Обычное (LZX:15)
+key Up
+key Enter
+waitfor 3000 Хорошее (LZX:18)
+key Alt+N
+type 100 Кб
+key Tab
+key Space
+key Enter
+waitfor 15000 src2.cab
+key Alt+X
+exit 3000
+#expect-file {WORK}\vol\src.exe
+#expect-file {WORK}\vol\src3.cab

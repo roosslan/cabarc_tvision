@@ -30,6 +30,12 @@ extern "C" {
 // zlib: распаковка gzip (.gz, .tar.gz, .tgz).
 #include "zlib.h"
 
+// LZMA SDK (C/ из репозитория 7-Zip): распаковка 7z.
+#include "7z.h"
+#include "7zAlloc.h"
+#include "7zCrc.h"
+#include "7zFile.h"
+
 namespace {
 
 const uint16_t kAttrMask = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN |
@@ -1275,6 +1281,228 @@ bool gzContainsTar(const std::string &path)
 }
 
 // ---------------------------------------------------------------------------
+// 7z (LZMA SDK, распаковщик на C)
+// ---------------------------------------------------------------------------
+
+const ISzAlloc g_szAlloc = {SzAlloc, SzFree};
+const ISzAlloc g_szAllocTemp = {SzAllocTemp, SzFreeTemp};
+
+// Открытый архив 7z: файл, буферизованный поток и разобранные заголовки.
+class SevenZip
+{
+public:
+    explicit SevenZip(const std::string &path)
+    {
+        static bool crcReady = (CrcGenerateTable(), true);
+        (void) crcReady;
+        SzArEx_Init(&db);
+        std::wstring w = fsu::widen(path);
+        if (InFile_OpenW(&file.file, w.c_str()) != 0)
+        {
+            result = SZ_ERROR_READ;
+            return;
+        }
+        fileOpen = true;
+        FileInStream_CreateVTable(&file);
+        file.wres = 0;
+        LookToRead2_CreateVTable(&look, False);
+        look.buf = static_cast<Byte *>(ISzAlloc_Alloc(&g_szAlloc, kBufSize));
+        if (!look.buf)
+        {
+            result = SZ_ERROR_MEM;
+            return;
+        }
+        look.bufSize = kBufSize;
+        look.realStream = &file.vt;
+        LookToRead2_INIT(&look)
+        result = SzArEx_Open(&db, &look.vt, &g_szAlloc, &g_szAllocTemp);
+        opened = result == SZ_OK;
+    }
+
+    ~SevenZip()
+    {
+        if (outBuffer)
+            ISzAlloc_Free(&g_szAlloc, outBuffer);
+        SzArEx_Free(&db, &g_szAlloc);
+        if (look.buf)
+            ISzAlloc_Free(&g_szAlloc, look.buf);
+        if (fileOpen)
+            File_Close(&file.file);
+    }
+
+    bool ok() const { return opened; }
+    SRes error() const { return result; }
+    UInt32 count() const { return db.NumFiles; }
+    bool isDir(UInt32 i) const { return SzArEx_IsDir(&db, i) != 0; }
+    uint64_t size(UInt32 i) const { return SzArEx_GetFileSize(&db, i); }
+
+    std::string name(UInt32 i) const
+    {
+        size_t len = SzArEx_GetFileNameUtf16(&db, i, nullptr);
+        std::vector<UInt16> buf(len + 1, 0);
+        SzArEx_GetFileNameUtf16(&db, i, buf.data());
+        std::wstring w(reinterpret_cast<const wchar_t *>(buf.data()));
+        std::string n = fsu::narrow(w);
+        for (char &c : n)
+            if (c == '/')
+                c = '\\';
+        while (!n.empty() && n.back() == '\\')
+            n.pop_back();
+        return n;
+    }
+
+    void dosTime(UInt32 i, uint16_t &date, uint16_t &time) const
+    {
+        date = (1 << 5) | 1;
+        time = 0;
+        if (!SzBitWithVals_Check(&db.MTime, i))
+            return;
+        FILETIME utc = {db.MTime.Vals[i].Low, db.MTime.Vals[i].High}, local;
+        WORD d, t;
+        if (FileTimeToLocalFileTime(&utc, &local) && FileTimeToDosDateTime(&local, &d, &t))
+        {
+            date = d;
+            time = t;
+        }
+    }
+
+    uint16_t attribs(UInt32 i) const
+    {
+        return SzBitWithVals_Check(&db.Attribs, i) ? uint16_t(db.Attribs.Vals[i] & kAttrMask) : 0;
+    }
+
+    // Распаковка файла: solid-блок распаковывается в память целиком
+    // и кэшируется для следующих файлов того же блока.
+    SRes extract(UInt32 i, const Byte *&data, size_t &length)
+    {
+        size_t offset = 0, processed = 0;
+        SRes r = SzArEx_Extract(&db, &look.vt, i, &blockIndex, &outBuffer, &outBufferSize, &offset,
+                                &processed, &g_szAlloc, &g_szAllocTemp);
+        data = outBuffer ? outBuffer + offset : nullptr;
+        length = processed;
+        return r;
+    }
+
+private:
+    static const size_t kBufSize = 1 << 18;
+    CSzArEx db;
+    CFileInStream file = {};
+    CLookToRead2 look = {};
+    bool fileOpen = false;
+    bool opened = false;
+    SRes result = SZ_OK;
+    UInt32 blockIndex = 0xFFFFFFFF;
+    Byte *outBuffer = nullptr;
+    size_t outBufferSize = 0;
+};
+
+std::string szErrorText(SRes r)
+{
+    switch (r)
+    {
+        case SZ_ERROR_UNSUPPORTED:
+            return "Неподдерживаемый метод сжатия или архив зашифрован паролем "
+                   "(7z с паролем не поддерживается)";
+        case SZ_ERROR_DATA:      return "Ошибка распаковки данных: архив повреждён";
+        case SZ_ERROR_CRC:       return "Ошибка контрольной суммы: архив повреждён";
+        case SZ_ERROR_MEM:       return "Недостаточно памяти (solid-блок 7z распаковывается в память целиком)";
+        case SZ_ERROR_NO_ARCHIVE:return "Файл не является архивом 7z";
+        case SZ_ERROR_ARCHIVE:   return "Архив повреждён: неверная структура 7z";
+        case SZ_ERROR_INPUT_EOF: return "Архив повреждён: неожиданный конец файла";
+        case SZ_ERROR_READ:      return "Ошибка чтения архива";
+        default:                 return "Ошибка 7z (код " + std::to_string(r) + ")";
+    }
+}
+
+bool szRead(const std::string &path, CabInfo &info, std::string &err)
+{
+    SevenZip z(path);
+    if (!z.ok())
+    {
+        err = "Не удалось открыть архив 7z " + path + "\n" + szErrorText(z.error());
+        return false;
+    }
+    for (UInt32 i = 0; i < z.count(); ++i)
+    {
+        if (z.isDir(i))
+            continue;
+        CabEntry e;
+        e.name = z.name(i);
+        if (e.name.empty())
+            continue;
+        e.size = z.size(i);
+        z.dosTime(i, e.date, e.time);
+        e.attribs = z.attribs(i);
+        e.index = i;
+        info.totalSize += e.size;
+        info.entries.push_back(std::move(e));
+    }
+    info.method = "7z";
+    return true;
+}
+
+bool szExtract(ExtractJob &j)
+{
+    SevenZip z(j.path);
+    if (!z.ok())
+    {
+        j.error = "Не удалось открыть архив 7z " + j.path + "\n" + szErrorText(z.error());
+        return false;
+    }
+    for (UInt32 i = 0; i < z.count(); ++i)
+    {
+        std::string name = z.name(i);
+        if (name.empty())
+            continue;
+        if (z.isDir(i))
+        {
+            if (j.all && j.keepPaths && !j.test)
+                fsu::makeDirs(cabTargetPath(j.destDir, name, true, j.base));
+            continue;
+        }
+        if (!j.wants(name))
+            continue;
+        const Byte *data = nullptr;
+        size_t length = 0;
+        SRes r = z.extract(i, data, length);
+        if (r != SZ_OK)
+        {
+            j.error = name + ": " + szErrorText(r);
+            return false;
+        }
+        size_t pos = 0;
+        uint16_t date, time;
+        z.dosTime(i, date, time);
+        FILETIME ft;
+        time_t mtime = 0;
+        if (DosDateTimeToFileTime(date, time, &ft))
+        {
+            // Время для writeTarget: из DOS-времени через FILETIME местного времени.
+            SYSTEMTIME st;
+            FileTimeToSystemTime(&ft, &st);
+            tm t = {};
+            t.tm_year = st.wYear - 1900;
+            t.tm_mon = st.wMonth - 1;
+            t.tm_mday = st.wDay;
+            t.tm_hour = st.wHour;
+            t.tm_min = st.wMinute;
+            t.tm_sec = st.wSecond;
+            t.tm_isdst = -1;
+            mtime = mktime(&t);
+        }
+        bool written = writeTarget(j, name, length, mtime, [&](void *buf, size_t n) {
+            size_t chunk = std::min(n, length - pos);
+            memcpy(buf, data + pos, chunk);
+            pos += chunk;
+            return (int64_t) chunk;
+        });
+        if (!written)
+            return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 
 bool runJob(ArchiveFormat format, ExtractJob &j, std::string &err, CabResult *result)
 {
@@ -1289,6 +1517,7 @@ bool runJob(ArchiveFormat format, ExtractJob &j, std::string &err, CabResult *re
         case ArchiveFormat::Rar:   rarExtract(j); break;
         case ArchiveFormat::Tar:   tarExtract(j, false); break;
         case ArchiveFormat::TarGz: tarExtract(j, true); break;
+        case ArchiveFormat::SevenZip: szExtract(j); break;
         default:                   gzExtract(j); break;
     }
     return finish(j, err, result);
@@ -1311,6 +1540,9 @@ ArchiveFormat archiveFormat(const std::string &path, bool sfx)
     if (n == kTarBlock && !tarZeroBlock(sig) && tarChecksumOk(sig) &&
         (memcmp(sig + 257, "ustar", 5) == 0 || fsu::upper(fsu::extension(path)) == "TAR"))
         return ArchiveFormat::Tar;
+    static const unsigned char kSevenZipSig[6] = {0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C};
+    if (n >= 6 && memcmp(sig, kSevenZipSig, 6) == 0)
+        return ArchiveFormat::SevenZip;
     if (n >= 4 && memcmp(sig, "MSCF", 4) == 0)
         return ArchiveFormat::Cab;
     if (n >= 4 && (memcmp(sig, "PK\x03\x04", 4) == 0 || memcmp(sig, "PK\x05\x06", 4) == 0))
@@ -1332,6 +1564,7 @@ const char *formatName(ArchiveFormat format)
         case ArchiveFormat::Gz:  return "GZIP";
         case ArchiveFormat::Tar: return "TAR";
         case ArchiveFormat::TarGz: return "TAR.GZ";
+        case ArchiveFormat::SevenZip: return "7Z";
         default:                 return "?";
     }
 }
@@ -1339,7 +1572,8 @@ const char *formatName(ArchiveFormat format)
 bool hasArchiveExtension(const std::string &name)
 {
     std::string ext = fsu::upper(fsu::extension(name));
-    return ext == "CAB" || ext == "ZIP" || ext == "RAR" || ext == "GZ" || ext == "TGZ" || ext == "TAR";
+    return ext == "CAB" || ext == "ZIP" || ext == "RAR" || ext == "GZ" || ext == "TGZ" || ext == "TAR" ||
+           ext == "7Z";
 }
 
 std::string archiveStem(const std::string &name)
@@ -1367,12 +1601,14 @@ bool archRead(const std::string &path, CabInfo &info, std::string &err)
         case ArchiveFormat::Gz:
         case ArchiveFormat::Tar:
         case ArchiveFormat::TarGz:
+        case ArchiveFormat::SevenZip:
         {
             info = CabInfo();
             info.path = path;
             bool ok = format == ArchiveFormat::Zip ? zipRead(path, info, err)
                     : format == ArchiveFormat::Rar ? rarRead(path, info, err)
                     : format == ArchiveFormat::Gz  ? gzRead(path, info, err)
+                    : format == ArchiveFormat::SevenZip ? szRead(path, info, err)
                     : tarRead(path, format == ArchiveFormat::TarGz, info, err);
             if (!ok)
                 return false;
@@ -1383,7 +1619,7 @@ bool archRead(const std::string &path, CabInfo &info, std::string &err)
             if (!fsu::fileExists(path))
                 err = "Не удалось открыть файл " + path;
             else
-                err = "Файл не является архивом CAB, ZIP, RAR, GZ или TAR";
+                err = "Файл не является архивом CAB, ZIP, RAR, 7Z, GZ или TAR";
             return false;
     }
     info.format = format;

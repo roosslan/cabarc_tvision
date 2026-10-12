@@ -1,0 +1,31 @@
+# ZIP и RAR: просмотр, свойства, запрет изменения, распаковка RAR с паролем.
+#zip {DATA}\src | {WORK}\zr\a.zip
+#copy {TESTDATA}\sample5.rar | {WORK}\zr\sample5.rar
+#copy {TESTDATA}\secret5.rar | {WORK}\zr\secret5.rar
+size 100 30
+run "{CABINE}" "{WORK}\zr"
+waitfor 5000 a.zip
+key Down
+key Enter
+waitfor 3000 Документ.txt
+key Alt+I
+waitfor 3000 Формат:           ZIP
+key Enter
+key F6
+waitfor 3000 только для просмотра
+key Enter
+key Back
+waitfor 3000 secret5.rar
+key Down
+key Down
+key F5
+waitfor 3000 Извлечь
+type {WORK}\zr\out
+key Enter
+waitfor 5000 Пароль
+type Пароль1
+key Enter
+wait 2000
+key Alt+X
+exit 3000
+#expect-same {DATA}\src | {WORK}\zr\out

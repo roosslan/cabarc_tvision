@@ -1,0 +1,34 @@
+# Внутри архива: извлечение, добавление по маске, удаление.
+#copy {DATA}\test.cab | {WORK}\panel\p.cab
+#remove {WORK}\panel\inner_out
+#copydir {DATA}\data | {WORK}\panel\data
+size 100 30
+run "{CABINE}" "{WORK}\panel\p.cab"
+waitfor 5000 numbers
+key Down
+key Enter
+waitfor 3000 file10.txt
+key F5
+waitfor 3000 Извлечь файлы
+type {WORK}\panel\inner_out
+key Enter
+wait 1500
+key F6
+waitfor 3000 Добавить в архив
+key Alt+V
+waitfor 3000 Добавить по маске
+type {WORK}\panel\data\readme.txt
+key Enter
+key Enter
+waitfor 8000 5 файлов
+key Back
+key Down
+key Down
+key F8
+waitfor 3000 Удалить из архива
+key Enter
+waitfor 8000 2 файла, 2 директории
+dump 05_deleted
+key Alt+X
+exit 3000
+#expect-file {WORK}\panel\inner_out\file10.txt

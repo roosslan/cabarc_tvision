@@ -1,0 +1,7 @@
+# -e: распаковка в поддиректорию с именем архива.
+#copy {TESTDATA}\sample.7z | {WORK}\batch\e\a.7z
+size 100 30
+run "{CABINE}" -e "{WORK}\batch\e\a.7z"
+waitfor 8000 Готово
+exit 5000
+#expect-same {DATA}\src | {WORK}\batch\e\a

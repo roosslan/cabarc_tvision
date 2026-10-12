@@ -1,0 +1,19 @@
+# Enter на программе в архиве: извлекается весь архив, программа видит соседние файлы.
+#remove {WORK}\runout.txt
+size 100 30
+run "{CABINE}" "{WORK}\run\exetest.cab"
+waitfor 5000 exetest
+key Down
+key Enter
+waitfor 3000 bin
+key Down
+key Enter
+waitfor 3000 run.bat
+key Down
+key Down
+key Enter
+wait 4000
+key Alt+X
+exit 3000
+#expect-contains {WORK}\runout.txt | helper.dll
+#expect-contains {WORK}\runout.txt | x.txt

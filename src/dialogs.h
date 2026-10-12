@@ -57,6 +57,9 @@ struct AddOptions
     std::string prefix;
     CompressionSpec compression;
     bool allowSfx = false;  // новый архив: показывать размер тома и выбор SFX
+    // Путь нового архива: показывается в окне, его расширение меняется вместе
+    // с галочкой SFX (.cab ↔ .exe); после закрытия окна — итоговый путь.
+    std::string archivePath;
     bool sfx = false;
     uint64_t volumeSize = 0;    // 0 — один файл
 };
@@ -91,6 +94,7 @@ struct Settings
     bool associateCab = false;      // файлы архивов открываются в Cabine
     bool associateZip = false;
     bool associateRar = false;
+    bool associate7z = false;
     bool associateTar = false;      // .tar, .tgz и .gz (в том числе .tar.gz)
     bool archivesFirst = false;     // архивы в панели выше остальных файлов
     CompressionSpec compression;    // метод сжатия новых архивов

@@ -1,0 +1,9 @@
+# Распаковка многотомного самораспаковывающегося архива.
+size 100 30
+run "{WORK}\vol\src.exe"
+waitfor 5000 томов:
+type {WORK}\vol\out
+key Enter
+waitfor 15000 Готово
+exit 5000
+#expect-same {WORK}\vol\src | {WORK}\vol\out\src
