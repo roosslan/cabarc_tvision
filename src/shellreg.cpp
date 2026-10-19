@@ -107,10 +107,18 @@ bool deleteLegacy(std::string &err)
     return true;
 }
 
+bool registerApplication(const std::string &cabineExe);
+bool unregisterApplication(const std::string &cabineExe);
+
 } // namespace
 
 bool registerShellMenu(const std::string &cabineExe, const std::string &shellExe, std::string &err)
 {
+    if (!registerApplication(cabineExe))
+    {
+        err = "Не удалось записать сведения о программе (HKCU\\Software\\Classes\\Applications)";
+        return false;
+    }
     std::wstring icon = quoted(cabineExe) + L",0";
     // Подменю пересоздаётся целиком: в нём не остаётся пунктов прежней регистрации.
     bool ok = deleteLegacy(err) && deleteVerb(kMenuKey, err) &&
@@ -170,6 +178,47 @@ std::string upperExt(const std::string &ext)
     return fsu::upper(ext);
 }
 
+const wchar_t *const kArchiveExts[] = {L"cab", L"zip", L"rar", L"7z", L"gz", L"tgz", L"tar"};
+
+std::wstring appKeyOf(const std::string &cabineExe)
+{
+    return std::wstring(kRoot) + L"Applications\\" + fsu::widen(fsu::baseName(cabineExe));
+}
+
+// «Открыть с помощью» → Cabine → «Всегда использовать»: Windows связывает расширение
+// с Applications\cabine.exe и берёт значок оттуда, а без DefaultIcon — первый значок
+// самой программы. Поэтому дописываются значок архива, имя и поддерживаемые типы.
+bool registerApplication(const std::string &cabineExe)
+{
+    std::wstring app = appKeyOf(cabineExe);
+    std::wstring exe = quoted(cabineExe);
+    bool ok = setKeyValue(app + L"\\DefaultIcon", nullptr, exe + L",-2") &&
+              setKeyValue(app, L"FriendlyAppName", L"Cabine") &&
+              setKeyValue(app + L"\\shell\\open\\command", nullptr, exe + L" \"%1\"");
+    for (const wchar_t *ext : kArchiveExts)
+        ok = ok && setKeyValue(app + L"\\SupportedTypes", (std::wstring(L".") + ext).c_str(), L"");
+    return ok;
+}
+
+// Команда открытия остаётся: на неё может ссылаться выбор пользователя в Проводнике.
+bool unregisterApplication(const std::string &cabineExe)
+{
+    std::wstring app = appKeyOf(cabineExe);
+    for (const wchar_t *sub : {L"\\DefaultIcon", L"\\SupportedTypes"})
+    {
+        std::wstring path = app + sub;
+        if (RegDeleteTreeW(HKEY_CURRENT_USER, path.c_str()) == ERROR_SUCCESS)
+            RegDeleteKeyW(HKEY_CURRENT_USER, path.c_str());
+    }
+    HKEY key;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, app.c_str(), 0, KEY_WRITE, &key) == ERROR_SUCCESS)
+    {
+        RegDeleteValueW(key, L"FriendlyAppName");
+        RegCloseKey(key);
+    }
+    return true;
+}
+
 } // namespace
 
 bool isAssociated(const std::string &ext)
@@ -205,7 +254,8 @@ bool setAssociation(const std::string &ext, bool enable, const std::string &cabi
         if (ok && readString(HKEY_CURRENT_USER, extKey, nullptr, previous) && previous != progId)
             ok = setKeyValue(extKey, kPrevValue, previous);
         ok = ok && setKeyValue(extKey, nullptr, progId) &&
-             setKeyValue(extKey + L"\\OpenWithProgids", progId.c_str(), L"");
+             setKeyValue(extKey + L"\\OpenWithProgids", progId.c_str(), L"") &&
+             registerApplication(cabineExe);
         if (!ok)
             err = "Не удалось записать ассоциацию ." + ext + " в реестр (HKCU\\Software\\Classes)";
         SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
@@ -244,9 +294,142 @@ bool setAssociation(const std::string &ext, bool enable, const std::string &cabi
     return true;
 }
 
-bool unregisterShellMenu(std::string &err)
+bool unregisterShellMenu(const std::string &cabineExe, std::string &err)
 {
-    bool ok = deleteVerb(kMenuKey, err) && deleteLegacy(err);
+    bool ok = deleteVerb(kMenuKey, err) && deleteLegacy(err) && unregisterApplication(cabineExe);
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
     return ok;
+}
+
+namespace {
+
+const wchar_t *const kEnvKey = L"Environment";
+
+// Path пользователя как есть (с %ПЕРЕМЕННЫМИ%, без раскрытия) и его тип.
+bool readUserPath(std::wstring &value, DWORD &type)
+{
+    value.clear();
+    type = REG_EXPAND_SZ;
+    HKEY key;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kEnvKey, 0, KEY_READ, &key) != ERROR_SUCCESS)
+        return true;
+    DWORD size = 0;
+    LSTATUS r = RegQueryValueExW(key, L"Path", nullptr, &type, nullptr, &size);
+    if (r == ERROR_SUCCESS && size > 0)
+    {
+        std::vector<wchar_t> buf(size / sizeof(wchar_t) + 1, 0);
+        r = RegQueryValueExW(key, L"Path", nullptr, &type, (BYTE *) buf.data(), &size);
+        if (r == ERROR_SUCCESS)
+            value = buf.data();
+    }
+    RegCloseKey(key);
+    if (type != REG_SZ && type != REG_EXPAND_SZ)
+        type = REG_EXPAND_SZ;
+    return r == ERROR_SUCCESS || r == ERROR_FILE_NOT_FOUND;
+}
+
+bool writeUserPath(const std::wstring &value, DWORD type)
+{
+    HKEY key;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, kEnvKey, 0, nullptr, 0, KEY_WRITE, nullptr, &key, nullptr) !=
+        ERROR_SUCCESS)
+        return false;
+    LSTATUS r = value.empty() ? RegDeleteValueW(key, L"Path")
+                              : RegSetValueExW(key, L"Path", 0, type, (const BYTE *) value.c_str(),
+                                               DWORD((value.size() + 1) * sizeof(wchar_t)));
+    RegCloseKey(key);
+    // Новые процессы (окна консоли, Проводник) перечитывают переменные окружения.
+    SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, (LPARAM) L"Environment",
+                        SMTO_ABORTIFHUNG, 3000, nullptr);
+    return r == ERROR_SUCCESS || (value.empty() && r == ERROR_FILE_NOT_FOUND);
+}
+
+// Элементы Path; сравнение без учёта регистра и завершающего «\».
+std::vector<std::wstring> splitPath(const std::wstring &path)
+{
+    std::vector<std::wstring> parts;
+    size_t start = 0;
+    while (start <= path.size())
+    {
+        size_t end = path.find(L';', start);
+        if (end == std::wstring::npos)
+            end = path.size();
+        if (end > start)
+            parts.push_back(path.substr(start, end - start));
+        start = end + 1;
+    }
+    return parts;
+}
+
+std::string normalizedDir(const std::wstring &dir)
+{
+    std::string s = fsu::upper(fsu::narrow(dir));
+    while (s.size() > 3 && (s.back() == '\\' || s.back() == '/'))
+        s.pop_back();
+    return s;
+}
+
+} // namespace
+
+bool userPathContains(const std::string &dir)
+{
+    std::wstring path;
+    DWORD type;
+    readUserPath(path, type);
+    std::string want = normalizedDir(fsu::widen(dir));
+    for (const std::wstring &p : splitPath(path))
+        if (normalizedDir(p) == want)
+            return true;
+    return false;
+}
+
+bool addToUserPath(const std::string &dir, std::string &err)
+{
+    if (userPathContains(dir))
+        return true;
+    std::wstring path;
+    DWORD type;
+    if (!readUserPath(path, type))
+    {
+        err = "Не удалось прочитать переменную Path пользователя (HKCU\\Environment)";
+        return false;
+    }
+    if (!path.empty() && path.back() != L';')
+        path += L';';
+    path += fsu::widen(dir);
+    if (!writeUserPath(path, type))
+    {
+        err = "Не удалось записать переменную Path пользователя (HKCU\\Environment)";
+        return false;
+    }
+    return true;
+}
+
+bool removeFromUserPath(const std::string &dir, std::string &err)
+{
+    std::wstring path;
+    DWORD type;
+    if (!readUserPath(path, type))
+    {
+        err = "Не удалось прочитать переменную Path пользователя (HKCU\\Environment)";
+        return false;
+    }
+    std::string drop = normalizedDir(fsu::widen(dir));
+    std::wstring result;
+    bool removed = false;
+    for (const std::wstring &p : splitPath(path))
+    {
+        if (normalizedDir(p) == drop)
+        {
+            removed = true;
+            continue;
+        }
+        result += (result.empty() ? L"" : L";") + p;
+    }
+    if (removed && !writeUserPath(result, type))
+    {
+        err = "Не удалось записать переменную Path пользователя (HKCU\\Environment)";
+        return false;
+    }
+    return true;
 }

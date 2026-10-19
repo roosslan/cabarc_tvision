@@ -1269,7 +1269,17 @@ bool settingsDialog(Settings &s)
     TComboBox *level = new TComboBox(TRect(3, 11, 30, 12), compressionLevels(),
                                      compressionLevel(s.compression));
     d->insert(level);
-    d->insert(new TLabel(TRect(2, 10, 40, 11), "~С~жатие новых архивов:", level));
+    d->insert(new TLabel(TRect(2, 10, 30, 11), "~С~жатие новых архивов:", level));
+
+    static const char *const editors[] = {"vim", "notepad++", "notepad"};
+    int editorIndex = 0;
+    for (int i = 0; i < 3; ++i)
+        if (s.editor == editors[i])
+            editorIndex = i;
+    TComboBox *editor = new TComboBox(TRect(32, 11, 53, 12),
+                                      {"vim", "Notepad++", "Блокнот (notepad)"}, editorIndex);
+    d->insert(editor);
+    d->insert(new TLabel(TRect(31, 10, 53, 11), "~Р~едактор (F4):", editor));
 
     d->insert(new TButton(TRect(15, 14, 27, 16), "O~K~", cmOK, bfDefault));
     d->insert(new TButton(TRect(29, 14, 41, 16), "Отмена", cmCancel, bfNormal));
@@ -1285,6 +1295,7 @@ bool settingsDialog(Settings &s)
         s.associateTar = (g & 16) != 0;
         s.archivesFirst = (g & 32) != 0;
         s.compression = compressionOfLevel(level->current());
+        s.editor = editors[editor->current()];
     }
     TObject::destroy(d);
     return r == cmOK;

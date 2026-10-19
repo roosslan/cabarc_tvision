@@ -11,14 +11,14 @@ waitfor 3000 Документ.txt
 key Alt+I
 waitfor 3000 Формат:           ZIP
 key Enter
-key F6
+key Alt+A
 waitfor 3000 только для просмотра
 key Enter
 key Back
 waitfor 3000 secret5.rar
 key Down
 key Down
-key F5
+key Alt+E
 waitfor 3000 Извлечь
 type {WORK}\zr\out
 key Enter

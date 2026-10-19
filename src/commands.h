@@ -29,7 +29,8 @@ enum : unsigned short
     cmSortSize,
     cmSortNone,
     cmGoUp,
-    cmPanelLast     = cmGoUp,
+    cmEditFile,
+    cmPanelLast     = cmEditFile,
 
     // Внутренние команды диалогов.
     cmAddItemFile   = 140,

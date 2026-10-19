@@ -201,7 +201,9 @@ TCabMenuBar::TCabMenuBar(const TRect &bounds, TSubMenu &aMenu) :
 
 void TCabMenuBar::handleEvent(TEvent &event)
 {
-    if (event.what == evKeyDown && menu)
+    // Сочетание, назначенное пункту меню (Alt+A — «Добавить в архив»), выполняет
+    // пункт, а не открывает подменю с русской буквой на той же клавише (Alt+Ф).
+    if (event.what == evKeyDown && menu && !hotKey(event.keyDown.keyCode))
     {
         bool withAlt;
         uint32_t letter = keyLetter(event, withAlt);

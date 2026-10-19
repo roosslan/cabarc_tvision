@@ -7,8 +7,10 @@
 //   файлы .cab, .zip, .rar, .7z, .gz, .tgz, .tar — «Открыть в Cabine», «Распаковать здесь»,
 //     «Извлечь в ...», «Добавить в CAB-архив», «Добавить в архив ...»;
 //   остальные файлы и директории — «Добавить в CAB-архив», «Добавить в архив ...».
+// Регистрация также дописывает в Applications\cabine.exe значок архива, имя и типы
+// файлов — их Windows использует для «Открыть с помощью»; отмена их убирает.
 bool registerShellMenu(const std::string &cabineExe, const std::string &shellExe, std::string &err);
-bool unregisterShellMenu(std::string &err);
+bool unregisterShellMenu(const std::string &cabineExe, std::string &err);
 
 // Ассоциация файлов архивов с Cabine (двойной щелчок открывает архив в панели).
 // ext — расширение без точки: "cab", "zip", "rar", "7z", "tar", "tgz", "gz". ProgID — Cabine.<ext>.
@@ -18,3 +20,10 @@ bool setAssociation(const std::string &ext, bool enable, const std::string &cabi
 // Выбор программы через «Открыть с помощью» (UserChoice) имеет приоритет
 // над ассоциацией и программно не меняется.
 bool userChoiceOverrides(const std::string &ext);
+
+// Директория программы в переменной Path текущего пользователя (HKCU\Environment):
+// после --register cabine запускается из любой консоли. Новые окна консоли
+// видят изменение сразу, уже открытые — после перезапуска.
+bool userPathContains(const std::string &dir);
+bool addToUserPath(const std::string &dir, std::string &err);
+bool removeFromUserPath(const std::string &dir, std::string &err);

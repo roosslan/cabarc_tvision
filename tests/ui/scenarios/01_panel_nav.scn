@@ -4,6 +4,9 @@
 size 100 30
 run "{CABINE}" "{WORK}\panel\p.cab"
 waitfor 5000 numbers
+waitfor 3000 F4 Правка
+waitfor 3000 Alt-E Извлечь
+waitfor 3000 F9 Меню
 key Down
 key Down
 key Enter

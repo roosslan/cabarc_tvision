@@ -672,3 +672,74 @@ void saveSetting(const std::string &key, const std::string &value)
 }
 
 } // namespace fsu
+
+namespace fsu {
+
+static std::string searchPath(const wchar_t *exe)
+{
+    wchar_t buf[MAX_PATH];
+    DWORD n = SearchPathW(nullptr, exe, nullptr, MAX_PATH, buf, nullptr);
+    return n > 0 && n < MAX_PATH ? narrow(buf) : std::string();
+}
+
+std::string findEditor(const std::string &kind)
+{
+    if (kind == "notepad")
+        return searchPath(L"notepad.exe");
+    if (kind == "notepad++")
+    {
+        std::string p = searchPath(L"notepad++.exe");
+        for (const wchar_t *var : {L"ProgramFiles", L"ProgramFiles(x86)", L"ProgramW6432"})
+        {
+            if (!p.empty())
+                break;
+            wchar_t dir[MAX_PATH];
+            DWORD n = GetEnvironmentVariableW(var, dir, MAX_PATH);
+            if (n > 0 && n < MAX_PATH)
+            {
+                std::string candidate = joinPath(joinPath(narrow(dir), "Notepad++"), "notepad++.exe");
+                if (fileExists(candidate))
+                    p = candidate;
+            }
+        }
+        return p;
+    }
+    return searchPath(L"vim.exe");
+}
+
+static bool startProcess(const std::string &commandLine, bool wait, std::string &err)
+{
+    std::wstring cmd = widen(commandLine);
+    STARTUPINFOW si = {sizeof(si)};
+    PROCESS_INFORMATION pi = {};
+    if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi))
+    {
+        err = "Не удалось запустить программу\n" + commandLine + "\n" + lastErrorText();
+        return false;
+    }
+    if (wait)
+        WaitForSingleObject(pi.hProcess, INFINITE);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return true;
+}
+
+bool runAndWait(const std::string &commandLine, std::string &err)
+{
+    return startProcess(commandLine, true, err);
+}
+
+bool runDetached(const std::string &commandLine, std::string &err)
+{
+    return startProcess(commandLine, false, err);
+}
+
+uint64_t fileWriteTime(const std::string &path)
+{
+    WIN32_FILE_ATTRIBUTE_DATA fad;
+    if (!GetFileAttributesExW(widen(path).c_str(), GetFileExInfoStandard, &fad))
+        return 0;
+    return (uint64_t(fad.ftLastWriteTime.dwHighDateTime) << 32) | fad.ftLastWriteTime.dwLowDateTime;
+}
+
+} // namespace fsu

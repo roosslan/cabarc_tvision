@@ -34,6 +34,14 @@ $work = Join-Path ([IO.Path]::GetTempPath()) ("cabine-ui-" + [Guid]::NewGuid().T
 New-Item -ItemType Directory $work | Out-Null
 $env:CABINE_SETTINGS_DIR = Join-Path $work 'settings'
 $env:CABINE_UI_WORK = $work
+# Редактор по F4: вместо vim — заменитель, дописывающий строку в файл.
+$fakevim = Join-Path $bin 'cabine-fakevim.exe'
+if (Test-Path $fakevim) {
+    $vimDir = Join-Path $work 'vim'
+    New-Item -ItemType Directory $vimDir | Out-Null
+    Copy-Item $fakevim (Join-Path $vimDir 'vim.exe')
+    $env:PATH = "$vimDir;$env:PATH"
+}
 $vars = @{
     '{CABINE}' = $cabine; '{SFX}' = $sfx; '{WORK}' = $work
     '{DATA}' = (Join-Path $root 'data'); '{TESTDATA}' = (Join-Path (Split-Path $root) 'data')

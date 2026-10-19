@@ -10,6 +10,7 @@
 #define Uses_TScrollBar
 #define Uses_TDrawBuffer
 #define Uses_TProgram
+#define Uses_TApplication
 #define Uses_TDeskTop
 #define Uses_MsgBox
 #include <tvision/tv.h>
@@ -525,6 +526,7 @@ void TPanelWindow::handleEvent(TEvent &event)
         case cmExtract:      extractFiles(); break;
         case cmDeleteFiles:  deleteFiles(); break;
         case cmViewFile:     viewFile(); break;
+        case cmEditFile:     editFile(); break;
         case cmOpenFile:     enterItem(focusedIndex()); break;
         case cmGoUp:         goUp(); break;
         case cmTestArchive:  testArchive(); break;
@@ -1089,6 +1091,75 @@ std::string TPanelWindow::extractToTemp(const std::string &entryName, bool allFi
         return archExtract(path, dir, names, allFiles, Overwrite::Always, p, err);
     });
     return ok ? cabTargetPath(dir, entryName, allFiles) : std::string();
+}
+
+// F4: файл открывается во внешнем редакторе из «Настройки» → «Параметры».
+// vim работает в той же консоли: Cabine освобождает её и ждёт выхода из vim.
+// Файл из архива редактируется во временной копии; изменённый файл
+// после vim можно вернуть в CAB (остальные форматы — только для чтения).
+void TPanelWindow::editFile()
+{
+    int index = focusedIndex();
+    if (index < 0 || items[index].kind != ItemKind::File)
+        return;
+    const PanelItem it = items[index];
+    std::string kind = fsu::loadSetting("Editor", "vim");
+    std::string editor = fsu::findEditor(kind);
+    if (editor.empty())
+    {
+        showError("Не найден редактор " + kind + (kind == "notepad++" ? "" : " (" + kind + ".exe в PATH)") +
+                  ".\nДругой редактор выбирается в «Настройки» → «Параметры».");
+        return;
+    }
+    std::string file, entryName;
+    if (archiveMode)
+    {
+        entryName = info.entries[it.entry].name;
+        file = extractToTemp(entryName);
+        if (file.empty())
+            return;
+    }
+    else
+        file = fsu::joinPath(fsDir, it.name);
+
+    std::string command = "\"" + editor + "\" \"" + file + "\"";
+    std::string err;
+    if (kind != "vim")
+    {
+        if (!fsu::runDetached(command, err))
+            showError(err);
+        return;
+    }
+    uint64_t before = fsu::fileWriteTime(file), sizeBefore = fsu::fileSize(file);
+    TProgram::application->suspend();
+    bool ok = fsu::runAndWait(command, err);
+    TProgram::application->resume();
+    TProgram::application->redraw();
+    if (!ok)
+    {
+        showError(err);
+        return;
+    }
+    if (!archiveMode)
+    {
+        refresh();
+        return;
+    }
+    if (fsu::fileWriteTime(file) == before && fsu::fileSize(file) == sizeBefore)
+        return;
+    if (readOnly())
+    {
+        showInfo("Изменения остались во временной копии файла.\n" + readOnlyReason());
+        return;
+    }
+    if (!confirm("Файл " + it.name + " изменён.\nОбновить его в архиве?"))
+        return;
+    std::string path = info.path;
+    CompressionSpec comp = info.compression;
+    runWithProgress("Обновление архива", [&](CabProgress *p, std::string &e) {
+        return cabUpdate(path, {}, {{file, entryName}}, comp, p, e);
+    });
+    refresh();
 }
 
 void TPanelWindow::viewFile()

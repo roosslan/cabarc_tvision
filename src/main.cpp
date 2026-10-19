@@ -18,7 +18,8 @@ const char *const kUsage =
     "cabine.exe -e <архив> [...]       распаковать архив в поддиректорию с его именем\n"
     "cabine.exe -ei <архив> [...]      распаковать архив в директорию, заданную в окне\n"
     "cabine.exe --register             добавить пункты в контекстное меню Проводника\n"
-    "cabine.exe --unregister           убрать пункты из контекстного меню Проводника\n"
+    "                                  и директорию программы в Path пользователя\n"
+    "cabine.exe --unregister           убрать пункты меню и директорию из Path\n"
     "\n"
     "Вместо пути можно указать @<файл> — список путей в UTF-8, по одному в строке\n"
     "(файл удаляется после чтения).\n";
@@ -94,10 +95,19 @@ int shellMenu(bool add)
         fsu::printConsole("Не найден " + shell + "\n");
         return 1;
     }
-    bool ok = add ? registerShellMenu(exe, shell, err) : unregisterShellMenu(err);
+    bool ok = add ? registerShellMenu(exe, shell, err) : unregisterShellMenu(exe, err);
     fsu::printConsole(!ok ? err + "\n"
                       : add ? "Пункты контекстного меню Проводника добавлены.\n"
                             : "Пункты контекстного меню Проводника удалены.\n");
+    if (!ok)
+        return 1;
+    // Директория программы — в Path пользователя: cabine запускается из любой консоли.
+    std::string dir = fsu::dirName(exe);
+    ok = add ? addToUserPath(dir, err) : removeFromUserPath(dir, err);
+    fsu::printConsole(!ok ? err + "\n"
+                      : add ? "Директория " + dir + " добавлена в Path пользователя "
+                              "(в новых окнах консоли cabine запускается по имени).\n"
+                            : "Директория " + dir + " убрана из Path пользователя.\n");
     return ok ? 0 : 1;
 }
 

@@ -8,12 +8,12 @@ waitfor 5000 numbers
 key Down
 key Enter
 waitfor 3000 file10.txt
-key F5
+key Alt+E
 waitfor 3000 Извлечь файлы
 type {WORK}\panel\inner_out
 key Enter
 wait 1500
-key F6
+key Alt+A
 waitfor 3000 Добавить в архив
 key Alt+V
 waitfor 3000 Добавить по маске

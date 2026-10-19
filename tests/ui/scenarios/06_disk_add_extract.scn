@@ -1,4 +1,4 @@
-# На диске: F6 создаёт архив из директории, F5 распаковывает его.
+# На диске: Alt+A создаёт архив из директории, Alt+E распаковывает его.
 #copydir {DATA}\data | {WORK}\panel\data
 #remove {WORK}\panel\data\numbers.cab
 #remove {WORK}\panel\fs_out
@@ -6,13 +6,13 @@ size 100 30
 run "{CABINE}" "{WORK}\panel\data"
 waitfor 5000 numbers
 key Down
-key F6
+key Alt+A
 waitfor 3000 Архив:
 key Enter
 waitfor 3000 Новый архив
 key Enter
 waitfor 8000 numbers.cab
-key F5
+key Alt+E
 waitfor 3000 Извлечь файлы
 type {WORK}\panel\fs_out
 key Enter
