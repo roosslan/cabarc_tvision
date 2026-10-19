@@ -94,7 +94,7 @@ int shellMenu(bool add)
         fsu::printConsole("Не найден " + shell + "\n");
         return 1;
     }
-    bool ok = add ? registerShellMenu(exe, shell, err) : unregisterShellMenu(err);
+    bool ok = add ? registerShellMenu(exe, shell, err) : unregisterShellMenu(exe, err);
     fsu::printConsole(!ok ? err + "\n"
                       : add ? "Пункты контекстного меню Проводника добавлены.\n"
                             : "Пункты контекстного меню Проводника удалены.\n");
