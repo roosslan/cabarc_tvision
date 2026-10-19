@@ -98,6 +98,7 @@ struct Settings
     bool associateTar = false;      // .tar, .tgz и .gz (в том числе .tar.gz)
     bool archivesFirst = false;     // архивы в панели выше остальных файлов
     CompressionSpec compression;    // метод сжатия новых архивов
+    std::string editor = "vim";     // редактор для F4: vim, notepad++ или notepad
 };
 
 bool settingsDialog(Settings &s);

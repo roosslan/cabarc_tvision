@@ -118,6 +118,7 @@ private:
     void deleteFiles();
     void deleteFromDisk();
     void viewFile();
+    void editFile();
     void testArchive();
     void showProperties();
     void markAll(bool mark);

@@ -1,0 +1,23 @@
+# F4 в архиве: файл открывается в редакторе (заменитель vim), изменённый файл обновляется в архиве.
+#copy {DATA}\test.cab | {WORK}\panel\p.cab
+#remove {WORK}\panel\edit_out
+size 100 30
+run "{CABINE}" "{WORK}\panel\p.cab"
+waitfor 5000 numbers
+key Down
+key Down
+key Down
+key Down
+key Down
+key F4
+waitfor 5000 Обновить его в архиве
+key Enter
+waitfor 8000 151 Б
+key Alt+E
+waitfor 3000 Извлечь файлы
+type {WORK}\panel\edit_out
+key Enter
+wait 1500
+key Alt+X
+exit 3000
+#expect-contains {WORK}\panel\edit_out\readme.txt | EDITED-BY-FAKEVIM

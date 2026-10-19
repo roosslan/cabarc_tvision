@@ -8,6 +8,8 @@ waitfor 3000 Параметры
 waitfor 3000 Ассоциировать файлы 7Z
 waitfor 3000 Ассоциировать файлы TAR, TGZ и GZ
 waitfor 3000 Максимальное (LZX:21)
+waitfor 3000 Редактор (F4)
+waitfor 3000 vim
 key Esc
 key Alt+X
 exit 3000

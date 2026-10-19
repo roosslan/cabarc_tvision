@@ -92,3 +92,18 @@ std::string loadSetting(const std::string &key, const std::string &def);
 void saveSetting(const std::string &key, const std::string &value);
 
 } // namespace fsu
+
+namespace fsu {
+
+// Внешний редактор для F4: kind — "vim", "notepad++" или "notepad".
+// Возвращает полный путь к программе или пустую строку, если она не найдена
+// (vim и notepad ищутся в PATH, Notepad++ — ещё и в Program Files).
+std::string findEditor(const std::string &kind);
+// Запуск программы в той же консоли с ожиданием завершения.
+bool runAndWait(const std::string &commandLine, std::string &err);
+// Запуск программы без ожидания.
+bool runDetached(const std::string &commandLine, std::string &err);
+// Время последнего изменения файла (0, если файла нет).
+uint64_t fileWriteTime(const std::string &path);
+
+} // namespace fsu

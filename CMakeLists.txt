@@ -209,6 +209,7 @@ if (CABINE_TESTS)
         src/cabfile.cpp
         src/format.cpp
         src/fsutil.cpp
+        src/shellreg.cpp
     )
     target_compile_features(cabine-tests PRIVATE cxx_std_17)
     target_compile_definitions(cabine-tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS
@@ -228,6 +229,9 @@ if (CABINE_TESTS)
     if (MSVC)
         target_compile_options(cabine-uidriver PRIVATE /W3 /utf-8)
     endif()
+    add_executable(cabine-fakevim tests/ui/fakevim.cpp)
+    target_compile_definitions(cabine-fakevim PRIVATE _CRT_SECURE_NO_WARNINGS)
+    add_dependencies(cabine-uidriver cabine-fakevim)
     # PSModulePath сбрасывается: при запуске из PowerShell 7 (шаг CI) Windows
     # PowerShell 5.1 иначе получает чужие пути модулей и не находит командлеты.
     add_test(NAME ui

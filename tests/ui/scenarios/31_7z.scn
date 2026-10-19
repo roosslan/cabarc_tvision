@@ -1,4 +1,4 @@
-# 7z: просмотр, свойства, запрет изменения, распаковка всего архива (F5 на «..»).
+# 7z: просмотр, свойства, запрет изменения, распаковка всего архива (Alt+E на «..»).
 #copy {TESTDATA}\sample.7z | {WORK}\7z\sample.7z
 size 100 30
 run "{CABINE}" "{WORK}\7z\sample.7z"
@@ -11,7 +11,7 @@ key F8
 waitfor 3000 только для просмотра
 key Enter
 key Home
-key F5
+key Alt+E
 waitfor 3000 Извлечь файлы
 type {WORK}\7z\out
 key Enter

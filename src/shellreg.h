@@ -20,3 +20,10 @@ bool setAssociation(const std::string &ext, bool enable, const std::string &cabi
 // Выбор программы через «Открыть с помощью» (UserChoice) имеет приоритет
 // над ассоциацией и программно не меняется.
 bool userChoiceOverrides(const std::string &ext);
+
+// Директория программы в переменной Path текущего пользователя (HKCU\Environment):
+// после --register cabine запускается из любой консоли. Новые окна консоли
+// видят изменение сразу, уже открытые — после перезапуска.
+bool userPathContains(const std::string &dir);
+bool addToUserPath(const std::string &dir, std::string &err);
+bool removeFromUserPath(const std::string &dir, std::string &err);

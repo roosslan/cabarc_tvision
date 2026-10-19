@@ -1,10 +1,10 @@
-# Самораспаковывающийся архив: галочка в окне создания (F6 на диске).
+# Самораспаковывающийся архив: галочка в окне создания (Alt+A на диске).
 #copydir {DATA}\src | {WORK}\sfx\src
 size 100 30
 run "{CABINE}" "{WORK}\sfx"
 waitfor 5000 src
 key Down
-key F6
+key Alt+A
 waitfor 3000 Обзор
 key Enter
 waitfor 3000 Новый архив

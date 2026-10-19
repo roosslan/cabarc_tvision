@@ -75,11 +75,12 @@ TMenuBar *TCabineApp::initMenuBar(TRect r)
             newLine() +
             *new TMenuItem("В~ы~ход", cmQuit, kbAltX, hcNoContext, "Alt-X") +
         *new TSubMenu("~К~оманды", kbNoKey) +
-            *new TMenuItem("~Д~обавить в архив...", cmAddFiles, kbF6, hcNoContext, "F6") +
-            *new TMenuItem("~И~звлечь...", cmExtract, kbF5, hcNoContext, "F5, Alt-E") +
+            *new TMenuItem("~Д~обавить в архив...", cmAddFiles, kbAltA, hcNoContext, "Alt-A") +
+            *new TMenuItem("~И~звлечь...", cmExtract, kbAltE, hcNoContext, "Alt-E") +
             *new TMenuItem("~У~далить", cmDeleteFiles, kbF8, hcNoContext, "F8, Del") +
             newLine() +
             *new TMenuItem("~П~росмотр", cmViewFile, kbF3, hcNoContext, "F3") +
+            *new TMenuItem("~Р~едактировать", cmEditFile, kbF4, hcNoContext, "F4") +
             *new TMenuItem("~О~ткрыть", cmOpenFile, kbNoKey, hcNoContext, "Enter") +
             *new TMenuItem("Перейти ~в~верх", cmGoUp, kbCtrlPgUp, hcNoContext, "Ctrl-PgUp") +
             newLine() +
@@ -109,13 +110,11 @@ TStatusLine *TCabineApp::initStatusLine(TRect r)
         *new TStatusDef(0, 0xFFFF) +
             *new TStatusItem("~Alt-X~ Выход", kbAltX, cmQuit) +
             *new TStatusItem("~F3~ Просмотр", kbF3, cmViewFile) +
-            *new TStatusItem("~F5~ Извлечь", kbF5, cmExtract) +
-            *new TStatusItem("~F6~ В архив", kbF6, cmAddFiles) +
+            *new TStatusItem("~F4~ Правка", kbF4, cmEditFile) +
+            *new TStatusItem("~Alt-E~ Извлечь", kbAltE, cmExtract) +
             *new TStatusItem("~F8~ Удалить", kbF8, cmDeleteFiles) +
-            *new TStatusItem("~F10~ Меню", kbF10, cmMenu) +
-            *new TStatusItem(0, kbAltF3, cmClose) +
-            // Скрытое второе сочетание для «Извлечь».
-            *new TStatusItem(0, kbAltE, cmExtract));
+            *new TStatusItem("~F9~ Меню", kbF9, cmMenu) +
+            *new TStatusItem(0, kbAltF3, cmClose));
 }
 
 void TCabineApp::getEvent(TEvent &event)
@@ -275,6 +274,7 @@ void TCabineApp::options()
     s.associateTar = isAssociated("tar") && isAssociated("tgz") && isAssociated("gz");
     s.archivesFirst = panel ? panel->archivesFirst : fsu::loadSetting("ArchivesFirst", "0") == "1";
     s.compression = defaultCompression;
+    s.editor = fsu::loadSetting("Editor", "vim");
     Settings was = s;
     if (!settingsDialog(s))
         return;
@@ -282,6 +282,7 @@ void TCabineApp::options()
     defaultCompression = s.compression;
     fsu::saveSetting("Compression", compressionName(defaultCompression));
     fsu::saveSetting("ArchivesFirst", s.archivesFirst ? "1" : "0");
+    fsu::saveSetting("Editor", s.editor);
     if (panel && panel->archivesFirst != s.archivesFirst)
     {
         panel->archivesFirst = s.archivesFirst;

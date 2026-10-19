@@ -11,6 +11,7 @@
 #include "../src/cabfile.h"
 #include "../src/format.h"
 #include "../src/fsutil.h"
+#include "../src/shellreg.h"
 
 #include <windows.h>
 
@@ -905,6 +906,64 @@ void testDetection(const std::string &root)
           "расширения архивов");
 }
 
+// Path пользователя: HKEY_CURRENT_USER подменяется временным разделом,
+// настоящая переменная Path не затрагивается.
+void testUserPath()
+{
+    section("Path пользователя");
+    std::wstring tmpKey = L"Software\\CabineTest-" + std::to_wstring(GetCurrentProcessId());
+    HKEY fake;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, tmpKey.c_str(), 0, nullptr, 0, KEY_ALL_ACCESS, nullptr, &fake,
+                        nullptr) != ERROR_SUCCESS)
+    {
+        check(false, "временный раздел реестра");
+        return;
+    }
+    RegOverridePredefKey(HKEY_CURRENT_USER, fake);
+
+    auto readPath = [](std::wstring &value, DWORD &type) {
+        wchar_t buf[1024] = {};
+        DWORD size = sizeof(buf);
+        bool ok = RegGetValueW(HKEY_CURRENT_USER, L"Environment", L"Path", RRF_RT_ANY | RRF_NOEXPAND, &type,
+                               buf, &size) == ERROR_SUCCESS;
+        value = buf;
+        return ok;
+    };
+    std::string err;
+    const std::string dir = "D:\\Prog\\Cabine";
+    check(!userPathContains(dir), "в пустом Path директории нет");
+    check(addToUserPath(dir, err), "добавление в отсутствующий Path: " + err);
+    std::wstring value;
+    DWORD type = 0;
+    check(readPath(value, type) && value == L"D:\\Prog\\Cabine" && type == REG_EXPAND_SZ,
+          "Path создан как REG_EXPAND_SZ");
+    check(removeFromUserPath(dir, err) && !readPath(value, type), "удаление единственного элемента убирает Path");
+
+    HKEY env;
+    RegCreateKeyExW(HKEY_CURRENT_USER, L"Environment", 0, nullptr, 0, KEY_WRITE, nullptr, &env, nullptr);
+    const std::wstring initial = L"%USERPROFILE%\\bin;C:\\Tools;";
+    RegSetValueExW(env, L"Path", 0, REG_EXPAND_SZ, (const BYTE *) initial.c_str(),
+                   DWORD((initial.size() + 1) * sizeof(wchar_t)));
+    RegCloseKey(env);
+    check(addToUserPath(dir, err) && readPath(value, type) &&
+              value == L"%USERPROFILE%\\bin;C:\\Tools;D:\\Prog\\Cabine",
+          "добавление в конец без удвоения «;», %переменные% не раскрываются");
+    check(addToUserPath("d:\\prog\\cabine\\", err) && readPath(value, type) &&
+              value == L"%USERPROFILE%\\bin;C:\\Tools;D:\\Prog\\Cabine",
+          "повторное добавление (другой регистр, «\\» в конце) ничего не меняет");
+    check(userPathContains("D:\\PROG\\CABINE"), "userPathContains без учёта регистра");
+    check(removeFromUserPath(dir, err) && readPath(value, type) && value == L"%USERPROFILE%\\bin;C:\\Tools" &&
+              type == REG_EXPAND_SZ,
+          "удаление оставляет прочие элементы");
+
+    RegOverridePredefKey(HKEY_CURRENT_USER, nullptr);
+    RegCloseKey(fake);
+    RegDeleteTreeW(HKEY_CURRENT_USER, tmpKey.c_str());
+    RegDeleteKeyW(HKEY_CURRENT_USER, tmpKey.c_str());
+
+    check(!fsu::findEditor("notepad").empty(), "findEditor находит notepad.exe");
+}
+
 } // namespace
 
 int main()
@@ -956,6 +1015,7 @@ int main()
     testTarGz(root, big);
     test7z(root);
     testDetection(root);
+    testUserPath();
 
     fsu::printConsole("\nПроверок: " + std::to_string(checks) + ", ошибок: " + std::to_string(failures) + "\n");
     if (failures == 0)
