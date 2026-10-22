@@ -30,11 +30,12 @@ extern "C" {
 // zlib: распаковка gzip (.gz, .tar.gz, .tgz).
 #include "zlib.h"
 
-// LZMA SDK (C/ из репозитория 7-Zip): распаковка 7z.
+// LZMA SDK (C/ из репозитория 7-Zip): распаковка 7z; расшифровка — src/7zaes.c.
 #include "7z.h"
 #include "7zAlloc.h"
 #include "7zCrc.h"
 #include "7zFile.h"
+#include "7zaes.h"
 
 namespace {
 
@@ -1371,6 +1372,24 @@ public:
         return SzBitWithVals_Check(&db.Attribs, i) ? uint16_t(db.Attribs.Vals[i] & kAttrMask) : 0;
     }
 
+    // Есть ли в архиве блоки, зашифрованные 7zAES (метод 06F10701).
+    bool encrypted() const
+    {
+        for (UInt32 f = 0; f < db.db.NumFolders; ++f)
+        {
+            CSzFolder folder;
+            CSzData sd;
+            sd.Data = db.db.CodersData + db.db.FoCodersOffsets[f];
+            sd.Size = db.db.FoCodersOffsets[f + 1] - db.db.FoCodersOffsets[f];
+            if (SzGetNextFolderItem(&folder, &sd) != SZ_OK)
+                continue;
+            for (UInt32 c = 0; c < folder.NumCoders; ++c)
+                if (folder.Coders[c].MethodID == 0x6F10701)
+                    return true;
+        }
+        return false;
+    }
+
     // Распаковка файла: solid-блок распаковывается в память целиком
     // и кэшируется для следующих файлов того же блока.
     SRes extract(UInt32 i, const Byte *&data, size_t &length)
@@ -1378,6 +1397,10 @@ public:
         size_t offset = 0, processed = 0;
         SRes r = SzArEx_Extract(&db, &look.vt, i, &blockIndex, &outBuffer, &outBufferSize, &offset,
                                 &processed, &g_szAlloc, &g_szAllocTemp);
+        // После ошибки SDK считает блок распакованным: кэш сбрасывается,
+        // иначе повтор (например, с другим паролем) вернул бы испорченные данные.
+        if (r != SZ_OK)
+            blockIndex = 0xFFFFFFFF;
         data = outBuffer ? outBuffer + offset : nullptr;
         length = processed;
         return r;
@@ -1400,9 +1423,8 @@ std::string szErrorText(SRes r)
 {
     switch (r)
     {
-        case SZ_ERROR_UNSUPPORTED:
-            return "Неподдерживаемый метод сжатия или архив зашифрован паролем "
-                   "(7z с паролем не поддерживается)";
+        case SZ_ERROR_UNSUPPORTED: return "Неподдерживаемый метод сжатия";
+        case SZ_ERROR_NO_PASSWORD: return "Для распаковки нужен пароль";
         case SZ_ERROR_DATA:      return "Ошибка распаковки данных: архив повреждён";
         case SZ_ERROR_CRC:       return "Ошибка контрольной суммы: архив повреждён";
         case SZ_ERROR_MEM:       return "Недостаточно памяти (solid-блок 7z распаковывается в память целиком)";
@@ -1414,41 +1436,104 @@ std::string szErrorText(SRes r)
     }
 }
 
+// Пароль для расшифровки 7z; nullptr — без пароля.
+void szSetPassword(const std::string *password)
+{
+    if (!password)
+    {
+        Sz7zAes_SetPassword(nullptr, 0);
+        return;
+    }
+    std::wstring w = fsu::widen(*password);
+    Sz7zAes_SetPassword(reinterpret_cast<const unsigned short *>(w.c_str()), w.size());
+}
+
+// Ошибка из-за пароля: зашифрованные данные встречались, а пароль не задан
+// либо не подошёл (неверный ключ даёт ошибку данных или контрольной суммы).
+bool szPasswordProblem(SRes r)
+{
+    return Sz7zAes_Used() && (r == SZ_ERROR_NO_PASSWORD || r == SZ_ERROR_DATA || r == SZ_ERROR_CRC ||
+                              r == SZ_ERROR_ARCHIVE || r == SZ_ERROR_UNSUPPORTED);
+}
+
+// Пароль после неудачной попытки: не задан — спрашивается, не подошёл —
+// спрашивается снова. false — пароль не введён.
+bool szAskPassword(const std::string &path, SRes r)
+{
+    bool retry = r != SZ_ERROR_NO_PASSWORD;
+    if (retry)
+        forgetPassword(path);
+    std::string password;
+    if (!getPassword(path, retry, password))
+        return false;
+    szSetPassword(&password);
+    return true;
+}
+
+// Открытие 7z. Без пароля к зашифрованным заголовкам список файлов недоступен:
+// пароль спрашивается сразу, при неверном — повторно. refused — пароль не введён.
+std::unique_ptr<SevenZip> szOpen(const std::string &path, std::string &err, bool *refused = nullptr)
+{
+    auto it = g_passwords.find(fsu::upper(path));
+    szSetPassword(it != g_passwords.end() ? &it->second : nullptr);
+    for (;;)
+    {
+        Sz7zAes_ResetUsed();
+        auto z = std::make_unique<SevenZip>(path);
+        if (z->ok())
+            return z;
+        SRes r = z->error();
+        z.reset();
+        if (!szPasswordProblem(r))
+        {
+            err = "Не удалось открыть архив 7z " + path + "\n" + szErrorText(r);
+            return nullptr;
+        }
+        if (!szAskPassword(path, r))
+        {
+            err = r == SZ_ERROR_NO_PASSWORD ? "Для открытия архива 7z нужен пароль\n" + path
+                                            : "Неверный пароль к архиву 7z\n" + path;
+            if (refused)
+                *refused = r == SZ_ERROR_NO_PASSWORD;
+            return nullptr;
+        }
+    }
+}
+
 bool szRead(const std::string &path, CabInfo &info, std::string &err)
 {
-    SevenZip z(path);
-    if (!z.ok())
-    {
-        err = "Не удалось открыть архив 7z " + path + "\n" + szErrorText(z.error());
+    auto z = szOpen(path, err);
+    if (!z)
         return false;
-    }
-    for (UInt32 i = 0; i < z.count(); ++i)
+    for (UInt32 i = 0; i < z->count(); ++i)
     {
-        if (z.isDir(i))
+        if (z->isDir(i))
             continue;
         CabEntry e;
-        e.name = z.name(i);
+        e.name = z->name(i);
         if (e.name.empty())
             continue;
-        e.size = z.size(i);
-        z.dosTime(i, e.date, e.time);
-        e.attribs = z.attribs(i);
+        e.size = z->size(i);
+        z->dosTime(i, e.date, e.time);
+        e.attribs = z->attribs(i);
         e.index = i;
         info.totalSize += e.size;
         info.entries.push_back(std::move(e));
     }
-    info.method = "7z";
+    info.method = z->encrypted() ? "7z, пароль" : "7z";
     return true;
 }
 
 bool szExtract(ExtractJob &j)
 {
-    SevenZip z(j.path);
-    if (!z.ok())
+    bool refused = false;
+    auto zp = szOpen(j.path, j.error, &refused);
+    if (!zp)
     {
-        j.error = "Не удалось открыть архив 7z " + j.path + "\n" + szErrorText(z.error());
+        j.cancelled = refused;
         return false;
     }
+    SevenZip &z = *zp;
     for (UInt32 i = 0; i < z.count(); ++i)
     {
         std::string name = z.name(i);
@@ -1464,7 +1549,22 @@ bool szExtract(ExtractJob &j)
             continue;
         const Byte *data = nullptr;
         size_t length = 0;
-        SRes r = z.extract(i, data, length);
+        SRes r;
+        for (;;)
+        {
+            Sz7zAes_ResetUsed();
+            r = z.extract(i, data, length);
+            if (r == SZ_OK || !szPasswordProblem(r))
+                break;
+            if (!szAskPassword(j.path, r))
+            {
+                if (r == SZ_ERROR_NO_PASSWORD)
+                    j.cancelled = true;
+                else
+                    j.error = name + ": неверный пароль";
+                return false;
+            }
+        }
         if (r != SZ_OK)
         {
             j.error = name + ": " + szErrorText(r);

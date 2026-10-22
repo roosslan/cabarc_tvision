@@ -112,13 +112,14 @@ if (MSVC)
 endif()
 
 # 7z — распаковщик на C из LZMA SDK (C/ в репозитории 7-Zip, общественное достояние):
-# LZMA, LZMA2, PPMd, BCJ/BCJ2/ARM и другие фильтры, Delta. Шифрование не поддерживается.
+# LZMA, LZMA2, PPMd, BCJ/BCJ2/ARM и другие фильтры, Delta; шифрование 7zAES —
+# src/7zaes.c (подключает 7zDec.c, поэтому 7zDec в списке нет).
 if (NOT EXISTS "${THIRD_PARTY}/7zip/C/7zDec.c")
     message(FATAL_ERROR "Не найден ${THIRD_PARTY}/7zip. Необходимо выполнить git submodule update --init.")
 endif()
-set(SZ_FILES 7zAlloc 7zArcIn 7zBuf 7zBuf2 7zCrc 7zCrcOpt 7zDec 7zFile 7zStream Bcj2 Bra Bra86
-    BraIA64 CpuArch Delta Lzma2Dec LzmaDec Ppmd7 Ppmd7Dec)
-set(SZ_SOURCES)
+set(SZ_FILES 7zAlloc 7zArcIn 7zBuf 7zBuf2 7zCrc 7zCrcOpt 7zFile 7zStream Aes AesOpt Bcj2 Bra Bra86
+    BraIA64 CpuArch Delta Lzma2Dec LzmaDec Ppmd7 Ppmd7Dec Sha256 Sha256Opt)
+set(SZ_SOURCES src/7zaes.c)
 foreach (f ${SZ_FILES})
     list(APPEND SZ_SOURCES "${THIRD_PARTY}/7zip/C/${f}.c")
 endforeach()
