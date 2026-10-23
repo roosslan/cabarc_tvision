@@ -527,6 +527,7 @@ void TPanelWindow::handleEvent(TEvent &event)
         case cmDeleteFiles:  deleteFiles(); break;
         case cmViewFile:     viewFile(); break;
         case cmEditFile:     editFile(); break;
+        case cmRename:       renameItem(); break;
         case cmOpenFile:     enterItem(focusedIndex()); break;
         case cmGoUp:         goUp(); break;
         case cmTestArchive:  testArchive(); break;
@@ -1431,7 +1432,11 @@ void TPanelWindow::deleteFromDisk()
         what = pluralFiles(files) + " и " + dirsAcc(dirs);
     else
         what = files ? pluralFiles(files) : dirsAcc(dirs);
-    if (!confirm("Удалить в корзину " + what + "?"))
+    // Без корзины (сетевой или съёмный диск, корзина отключена) удаление
+    // безвозвратное — об этом говорится в вопросе.
+    bool permanent = !fsu::hasRecycleBin(fsDir);
+    if (!confirm(permanent ? "Корзина на этом диске недоступна.\nУдалить безвозвратно " + what + "?"
+                           : "Удалить в корзину " + what + "?"))
         return;
 
     // Курсор встаёт на первую оставшуюся строку после удаляемых.
@@ -1445,10 +1450,55 @@ void TPanelWindow::deleteFromDisk()
         }
 
     std::string err;
-    if (!fsu::recycle(paths, err))
+    if (!fsu::recycle(paths, err, permanent))
         showError(err);
     if (loadDirectoryItems(fsDir, items))
         rebuild(next, {});
+    else
+        openDirectory(fsu::existingDir(fsDir));
+}
+
+// Переименование файла или директории под курсором (только на диске).
+void TPanelWindow::renameItem()
+{
+    if (archiveMode)
+    {
+        showInfo("Переименование внутри архива не поддерживается.");
+        return;
+    }
+    int i = focusedIndex();
+    if (i < 0 || i >= (int) items.size() || (items[i].kind != ItemKind::File && items[i].kind != ItemKind::Dir))
+        return;
+    std::string oldName = items[i].name, name = oldName;
+    if (!askText("Переименование", items[i].kind == ItemKind::Dir ? "~Н~овое имя директории:" : "~Н~овое имя файла:",
+                 name))
+        return;
+    while (!name.empty() && name.back() == ' ')
+        name.pop_back();
+    while (!name.empty() && name.front() == ' ')
+        name.erase(0, 1);
+    if (name.empty() || name == oldName)
+        return;
+    if (name.find_first_of("\\/:*?\"<>|") != std::string::npos || name == "." || name == "..")
+    {
+        showError("Имя не может содержать символы \\ / : * ? \" < > |");
+        return;
+    }
+    std::string from = fsu::joinPath(fsDir, oldName), to = fsu::joinPath(fsDir, name);
+    // Смена одного регистра букв — то же имя для файловой системы, это не конфликт.
+    if (fsu::upper(name) != fsu::upper(oldName) && (fsu::fileExists(to) || fsu::dirExists(to)))
+    {
+        showError("Файл или директория с таким именем уже существует\n" + name);
+        return;
+    }
+    std::string err;
+    if (!fsu::renamePath(from, to, err))
+    {
+        showError("Не удалось переименовать " + oldName + "\n" + err);
+        return;
+    }
+    if (loadDirectoryItems(fsDir, items))
+        rebuild(name, {});
     else
         openDirectory(fsu::existingDir(fsDir));
 }

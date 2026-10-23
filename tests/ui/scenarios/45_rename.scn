@@ -1,0 +1,31 @@
+# Переименование на диске: директория (Shift+F6), файл (F2), отказ при занятом имени.
+#remove {WORK}\ren
+#copydir {DATA}\src | {WORK}\ren\folder
+#copy {DATA}\src\readme.txt | {WORK}\ren\a.txt
+size 100 30
+run "{CABINE}" "{WORK}\ren"
+waitfor 5000 a.txt
+key Down
+key Shift+F6
+waitfor 3000 Новое имя директории
+type папка
+key Enter
+waitfor 3000 папка
+key Down
+key F2
+waitfor 3000 Новое имя файла
+type папка
+key Enter
+waitfor 3000 уже существует
+key Enter
+key F2
+waitfor 3000 Новое имя файла
+type b.txt
+key Enter
+waitfor 3000 b.txt
+key Alt+X
+exit 3000
+#expect-file {WORK}\ren\папка\Документ.txt
+#expect-file {WORK}\ren\b.txt
+#expect-missing {WORK}\ren\a.txt
+#expect-missing {WORK}\ren\folder
