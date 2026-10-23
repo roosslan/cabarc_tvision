@@ -889,15 +889,37 @@ void test7z(const std::string &root)
     check(ok && res.skipped == 1 && readFile(fsu::joinPath(out, "readme.txt")) == "local",
           "без перезаписи существующий файл не тронут");
 
-    // Шифрование не поддерживается: понятные сообщения.
+    // Пароль на данные (7zAES): список читается без пароля, распаковка спрашивает его;
+    // неверный пароль — повторный запрос.
     CabInfo info;
     std::string secret = fsu::joinPath(data, "secret.7z");
+    resetPasswords({});
     ok = archRead(secret, info, err);
-    check(ok && info.entries.size() == 3, "список 7z с паролем на данные читается");
-    ok = archExtract(secret, fsu::joinPath(dir, "secret"), {}, true, Overwrite::Always, nullptr, err);
-    check(!ok && err.find("парол") != std::string::npos, "распаковка 7z с паролем — сообщение: " + err);
-    ok = archRead(fsu::joinPath(data, "secrethdr.7z"), info, err);
-    check(!ok && err.find("парол") != std::string::npos, "7z с зашифрованными заголовками — сообщение: " + err);
+    check(ok && info.entries.size() == 3 && info.method == "7z, пароль" && g_script.asked == 0,
+          "список 7z с паролем на данные читается без пароля " + err);
+    std::string so = fsu::joinPath(dir, "secret");
+    ok = archExtract(secret, so, {}, true, Overwrite::Always, nullptr, err, &res);
+    check(!ok && g_script.asked == 0, "без пароля 7z не распаковывается");
+    resetPasswords({"неверный", "Пароль1"});
+    ok = archExtract(secret, so, {}, true, Overwrite::Always, nullptr, err, &res);
+    check(ok && res.files == 3 && g_script.asked == 2 && g_script.retries >= 1,
+          "распаковка 7z с паролем, после неверного спрошен снова " + err);
+    check(readFile(fsu::joinPath(so, "readme.txt")) == "Hello, RAR!\r\n" &&
+              readFile(fsu::joinPath(so, "sub\\Вложенный\\data.bin")) == bin,
+          "содержимое расшифровано верно");
+
+    // Зашифрованные заголовки: пароль нужен уже для списка.
+    std::string hdr = fsu::joinPath(data, "secrethdr.7z");
+    resetPasswords({"неверный", "Пароль1"});
+    ok = archRead(hdr, info, err);
+    check(ok && info.entries.size() == 3 && g_script.asked == 2, "список 7z с шифрованием заголовков " + err);
+    resetPasswords({});
+    check(archTest(hdr, nullptr, err, &res) && res.files == 3, "пароль 7z запомнен для архива " + err);
+    resetPasswords({});
+    std::string fresh = fsu::joinPath(dir, "hdr-copy.7z");
+    CopyFileW(fsu::widen(hdr).c_str(), fsu::widen(fresh).c_str(), FALSE);
+    ok = archRead(fresh, info, err);
+    check(!ok && err.find("пароль") != std::string::npos, "без пароля — сообщение: " + err);
 
     check(hasArchiveExtension("a.7Z") && archiveStem("архив.7z") == "архив", "расширение .7z");
 }
