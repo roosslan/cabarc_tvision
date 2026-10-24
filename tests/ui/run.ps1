@@ -11,6 +11,7 @@
 #   #targz РОДИТЕЛЬ | ИМЯ | ФАЙЛ.tar.gz   (системный tar.exe)
 # и после завершения сценария:
 #   #expect-file ПУТЬ                #expect-same ДИРЕКТОРИЯ | ДИРЕКТОРИЯ
+#   #expect-missing ПУТЬ
 #   #expect-contains ФАЙЛ | ТЕКСТ
 # Настройки программы хранятся в {WORK}\settings (переменная CABINE_SETTINGS_DIR),
 # настройки пользователя не затрагиваются.
@@ -112,6 +113,7 @@ function SameTree([string]$a, [string]$b) {
 function Check([string]$cmd, [string[]]$a) {
     switch ($cmd) {
         'expect-file' { if (-not (Test-Path -LiteralPath $a[0])) { return "нет файла $($a[0])" } }
+        'expect-missing' { if (Test-Path -LiteralPath $a[0]) { return "остался $($a[0])" } }
         'expect-same' { return (SameTree $a[0] $a[1]) }
         'expect-contains' {
             if (-not (Test-Path -LiteralPath $a[0])) { return "нет файла $($a[0])" }

@@ -147,6 +147,16 @@ void testFsutil(const std::string &src)
     check(fsu::safeRelPath("..\\..\\C:\\evil\\x.txt") == "C_\\evil\\x.txt", "safeRelPath отсекает .. и диск");
     check(fsu::safeRelPath("C:\\Windows\\a.dll") == "Windows\\a.dll", "safeRelPath отсекает ведущий диск");
     check(fsu::compareNatural(L"file2", L"file10") < 0, "compareNatural: file2 раньше file10");
+
+    std::string a = fsu::joinPath(src, "..\\ren-a.txt"), b = fsu::joinPath(src, "..\\ren-b.txt");
+    writeFile(a, "a");
+    writeFile(b, "b");
+    check(!fsu::renamePath(a, b, err) && readFile(b) == "b", "renamePath не заменяет существующий файл");
+    check(fsu::removeFile(b) && fsu::renamePath(a, b, err) && readFile(b) == "a" && !fsu::fileExists(a),
+          "renamePath переименовывает " + err);
+    fsu::removeFile(b);
+    check(!fsu::hasRecycleBin("\\\\server\\share\\file.txt"), "у сетевого пути корзины нет");
+    check(fsu::hasRecycleBin(fsu::exePath()), "у локального диска с программой корзина есть");
 }
 
 std::vector<CabSource> sourcesOf(const std::string &dir)
