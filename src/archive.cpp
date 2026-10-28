@@ -1282,6 +1282,145 @@ bool gzContainsTar(const std::string &path)
 }
 
 // ---------------------------------------------------------------------------
+// Самораспаковывающиеся RAR, 7z и ZIP: программа (MZ), после которой дописан
+// архив. Подписи RAR и 7z ищутся в первых 4 Мб (столько просматривает UnRAR),
+// оглавление ZIP — в конце файла. Каждая находка подтверждается контрольной
+// суммой заголовка: те же байты встречаются в данных обычных программ
+// (например, в самом cabine.exe — в коде UnRAR и LZMA SDK).
+// ---------------------------------------------------------------------------
+
+const size_t kSfxScan = 0x400000;
+
+bool readAt(const std::string &path, uint64_t pos, std::vector<uint8_t> &buf, size_t max)
+{
+    FILE *f = _wfopen(fsu::widen(path).c_str(), L"rb");
+    if (!f)
+        return false;
+    buf.resize(max);
+    size_t n = _fseeki64(f, (int64_t) pos, SEEK_SET) == 0 ? fread(buf.data(), 1, max, f) : 0;
+    fclose(f);
+    buf.resize(n);
+    return n > 0;
+}
+
+uint32_t crcOf(const uint8_t *p, size_t n)
+{
+    return (uint32_t) crc32(0, p, (uInt) n);
+}
+
+// Число переменной длины RAR5 (vint): по 7 бит в байте, старший бит — продолжение.
+bool rarVint(const uint8_t *p, const uint8_t *end, uint64_t &value, size_t &len)
+{
+    value = 0;
+    len = 0;
+    for (int shift = 0; p + len < end && shift < 64; shift += 7)
+    {
+        uint8_t b = p[len++];
+        value |= uint64_t(b & 0x7F) << shift;
+        if (!(b & 0x80))
+            return true;
+    }
+    return false;
+}
+
+// Подпись RAR и следующий за ней главный заголовок архива с верной контрольной суммой.
+bool rarHeaderAt(const uint8_t *p, const uint8_t *end)
+{
+    if (end - p >= 7 + 7 && memcmp(p, "Rar!\x1A\x07\x00", 7) == 0)
+    {
+        // RAR4: CRC16 (младшие биты CRC32), тип 0x73, флаги, размер заголовка.
+        const uint8_t *h = p + 7;
+        uint16_t size = rd16(h + 5);
+        if (h[2] != 0x73 || size < 7 || size > end - h)
+            return false;
+        return (crcOf(h + 2, size - 2) & 0xFFFF) == rd16(h);
+    }
+    if (end - p >= 8 + 4 + 2 && memcmp(p, "Rar!\x1A\x07\x01\x00", 8) == 0)
+    {
+        // RAR5: CRC32, размер заголовка (vint), тип (vint; 1 — главный заголовок).
+        const uint8_t *h = p + 8;
+        uint64_t size, type;
+        size_t len, typeLen;
+        if (!rarVint(h + 4, end, size, len) || size == 0 || size > uint64_t(end - (h + 4 + len)))
+            return false;
+        if (!rarVint(h + 4 + len, end, type, typeLen) || type != 1)
+            return false;
+        return crcOf(h + 4, len + (size_t) size) == rd32(h);
+    }
+    return false;
+}
+
+// Подпись 7z и начальный заголовок (20 байт) с верной контрольной суммой.
+bool sevenZipHeaderAt(const uint8_t *p, const uint8_t *end)
+{
+    static const uint8_t kSig[6] = {0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C};
+    return end - p >= 32 && memcmp(p, kSig, 6) == 0 && crcOf(p + 12, 20) == rd32(p + 8);
+}
+
+// Оглавление ZIP в конце файла: запись конца оглавления (PK 05 06) и начало
+// оглавления (PK 01 02) там, куда она указывает, — по смещению из записи либо
+// сразу перед ней (если смещения в архиве не исправлены после дописывания к программе).
+bool zipTailOk(const std::string &path)
+{
+    uint64_t size = fsu::fileSize(path);
+    if (size < 22)
+        return false;
+    size_t tail = (size_t) std::min<uint64_t>(size, 0xFFFF + 22);
+    std::vector<uint8_t> t;
+    if (!readAt(path, size - tail, t, tail) || t.size() != tail)
+        return false;
+    for (size_t i = tail - 22 + 1; i-- > 0;)
+    {
+        const uint8_t *e = t.data() + i;
+        if (memcmp(e, "PK\x05\x06", 4) != 0)
+            continue;
+        uint64_t eocd = size - tail + i;
+        uint32_t cdSize = rd32(e + 12), cdOffset = rd32(e + 16);
+        if (cdOffset == 0xFFFFFFFF || cdSize == 0xFFFFFFFF)
+            return i >= 20 && memcmp(e - 20, "PK\x06\x07", 4) == 0;   // ZIP64
+        if (cdSize == 0 || cdSize > eocd)
+            return false;
+        std::vector<uint8_t> sig;
+        for (uint64_t at : {uint64_t(cdOffset), eocd - cdSize})
+            if (at < eocd && readAt(path, at, sig, 4) && sig.size() == 4 && memcmp(sig.data(), "PK\x01\x02", 4) == 0)
+                return true;
+        return false;
+    }
+    return false;
+}
+
+// Формат и начало архива в самораспаковывающемся файле; Unknown — не SFX.
+ArchiveFormat sfxFormat(const std::string &path, uint64_t *offset = nullptr)
+{
+    std::vector<uint8_t> b;
+    if (!readAt(path, 0, b, 2) || b.size() != 2 || b[0] != 'M' || b[1] != 'Z')
+        return ArchiveFormat::Unknown;
+    if (!readAt(path, 0, b, kSfxScan) || b.size() < 64)
+        return ArchiveFormat::Unknown;
+    const uint8_t *end = b.data() + b.size();
+    for (size_t i = 2; i + 14 <= b.size(); ++i)
+    {
+        const uint8_t *p = b.data() + i;
+        ArchiveFormat f = *p == 'R' && rarHeaderAt(p, end)        ? ArchiveFormat::Rar
+                        : *p == 0x37 && sevenZipHeaderAt(p, end) ? ArchiveFormat::SevenZip
+                                                                  : ArchiveFormat::Unknown;
+        if (f != ArchiveFormat::Unknown)
+        {
+            if (offset)
+                *offset = i;
+            return f;
+        }
+    }
+    if (zipTailOk(path))
+    {
+        if (offset)
+            *offset = 0;
+        return ArchiveFormat::Zip;
+    }
+    return ArchiveFormat::Unknown;
+}
+
+// ---------------------------------------------------------------------------
 // 7z (LZMA SDK, распаковщик на C)
 // ---------------------------------------------------------------------------
 
@@ -1316,6 +1455,18 @@ public:
         look.bufSize = kBufSize;
         look.realStream = &file.vt;
         LookToRead2_INIT(&look)
+        // Самораспаковывающийся 7z: архив начинается после программы, SzArEx_Open
+        // читает его с текущей позиции потока.
+        uint64_t start = 0;
+        if (sfxFormat(path, &start) == ArchiveFormat::SevenZip && start != 0)
+        {
+            Int64 pos = (Int64) start;
+            if (ILookInStream_Seek(&look.vt, &pos, SZ_SEEK_SET) != SZ_OK)
+            {
+                result = SZ_ERROR_READ;
+                return;
+            }
+        }
         result = SzArEx_Open(&db, &look.vt, &g_szAlloc, &g_szAllocTemp);
         opened = result == SZ_OK;
     }
@@ -1651,6 +1802,8 @@ ArchiveFormat archiveFormat(const std::string &path, bool sfx)
         return ArchiveFormat::Rar;
     if (sfx && cabHasSignature(path, true))
         return ArchiveFormat::Cab;
+    if (sfx && n >= 2 && sig[0] == 'M' && sig[1] == 'Z')
+        return sfxFormat(path);
     return ArchiveFormat::Unknown;
 }
 

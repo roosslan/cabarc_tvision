@@ -1,0 +1,29 @@
+# Самораспаковывающиеся 7z и RAR: F3 показывает содержимое в панели, распаковка всего архива.
+#remove {WORK}\fsfx
+#concat {SFX} | {TESTDATA}\sample.7z | {WORK}\fsfx\a-sfx.exe
+#concat {SFX} | {TESTDATA}\sample5.rar | {WORK}\fsfx\b-sfx.exe
+size 100 30
+run "{CABINE}" "{WORK}\fsfx"
+waitfor 5000 b-sfx.exe
+key Down
+key F3
+waitfor 5000 Документ.txt
+key Alt+I
+waitfor 3000 Формат:           7Z
+key Enter
+key Back
+waitfor 3000 b-sfx.exe
+key Down
+key F3
+waitfor 5000 Документ.txt
+key Alt+I
+waitfor 3000 Формат:           RAR
+key Enter
+key Alt+E
+waitfor 3000 Извлечь файлы
+type {WORK}\fsfx\out
+key Enter
+wait 2000
+key Alt+X
+exit 3000
+#expect-same {DATA}\src | {WORK}\fsfx\out

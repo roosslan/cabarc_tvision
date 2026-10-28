@@ -9,6 +9,7 @@
 #   #copy ИСТОЧНИК | НАЗНАЧЕНИЕ      #copydir ИСТОЧНИК | НАЗНАЧЕНИЕ     #remove ПУТЬ
 #   #random ПУТЬ | БАЙТ              #zip ДИРЕКТОРИЯ | ФАЙЛ.zip
 #   #targz РОДИТЕЛЬ | ИМЯ | ФАЙЛ.tar.gz   (системный tar.exe)
+#   #concat ФАЙЛ | ФАЙЛ | РЕЗУЛЬТАТ       (склейка, например программа + архив = SFX)
 # и после завершения сценария:
 #   #expect-file ПУТЬ                #expect-same ДИРЕКТОРИЯ | ДИРЕКТОРИЯ
 #   #expect-contains ФАЙЛ | ТЕКСТ
@@ -67,6 +68,11 @@ function Setup([string]$cmd, [string[]]$a) {
             EnsureParent $a[1]; Copy-Item -LiteralPath $a[0] -Destination $a[1] -Recurse
         }
         'remove' { if (Test-Path -LiteralPath $a[0]) { Remove-Item -LiteralPath $a[0] -Recurse -Force } }
+        'concat' {
+            EnsureParent $a[2]
+            $bytes = [IO.File]::ReadAllBytes($a[0]) + [IO.File]::ReadAllBytes($a[1])
+            [IO.File]::WriteAllBytes($a[2], [byte[]]$bytes)
+        }
         'random' {
             EnsureParent $a[0]
             $bytes = New-Object byte[] ([int]$a[1])

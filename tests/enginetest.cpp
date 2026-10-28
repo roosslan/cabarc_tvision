@@ -914,6 +914,42 @@ void test7z(const std::string &root)
     check(hasArchiveExtension("a.7Z") && archiveStem("архив.7z") == "архив", "расширение .7z");
 }
 
+// Самораспаковывающиеся RAR, 7z и ZIP: программа, после которой дописан архив.
+void testForeignSfx(const std::string &root)
+{
+    section("Самораспаковывающиеся RAR, 7z, ZIP");
+    std::string data = CABINE_TEST_DATA;
+    std::string dir = fsu::joinPath(root, "sfx-foreign");
+    fsu::makeDirs(dir);
+    std::string stub = readFile(CABINE_SFX_STUB);
+    std::string zip = fsu::joinPath(dir, "plain.zip");
+    makeZip(zip, {{"readme.txt", "Hello, ZIP!\r\n"}, {"sub/Документ.txt", "Привет, ZIP!"}});
+
+    struct { const char *name; std::string archive; ArchiveFormat format; const char *readme; } cases[] = {
+        {"rar-sfx.exe", fsu::joinPath(data, "sample5.rar"), ArchiveFormat::Rar, "Hello, RAR!\r\n"},
+        {"7z-sfx.exe", fsu::joinPath(data, "sample.7z"), ArchiveFormat::SevenZip, "Hello, RAR!\r\n"},
+        {"zip-sfx.exe", zip, ArchiveFormat::Zip, "Hello, ZIP!\r\n"},
+    };
+    std::string err;
+    for (auto &c : cases)
+    {
+        std::string exe = fsu::joinPath(dir, c.name);
+        writeFile(exe, stub + readFile(c.archive));
+        check(archiveFormat(exe, true) == c.format, std::string(c.name) + ": формат " + formatName(c.format));
+        check(archiveFormat(exe) == ArchiveFormat::Unknown, std::string(c.name) + ": без sfx — программа");
+        CabInfo info;
+        bool ok = archRead(exe, info, err);
+        check(ok && hasEntry(info, "readme.txt"), std::string(c.name) + ": список " + err);
+        std::string out = fsu::joinPath(dir, std::string(c.name) + ".out");
+        ok = archExtract(exe, out, {}, true, Overwrite::Always, nullptr, err);
+        check(ok && readFile(fsu::joinPath(out, "readme.txt")) == c.readme, std::string(c.name) + ": распаковка " + err);
+    }
+    // Обычные программы с теми же байтами в данных (код UnRAR и LZMA SDK) — не архивы.
+    check(archiveFormat(CABINE_SFX_STUB, true) == ArchiveFormat::Unknown, "распаковщик Cabine — не архив");
+    check(archiveFormat(fsu::exePath(), true) == ArchiveFormat::Unknown,
+          "программа с кодом UnRAR и LZMA SDK — не архив");
+}
+
 void testDetection(const std::string &root)
 {
     section("Определение формата");
@@ -1036,6 +1072,7 @@ int main()
     testRar(root);
     testTarGz(root, big);
     test7z(root);
+    testForeignSfx(root);
     testDetection(root);
     testUserPath();
 
