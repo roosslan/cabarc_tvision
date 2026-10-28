@@ -17,6 +17,8 @@ const char *const kUsage =
     "cabine.exe -x <архив> [...]       распаковать архив (CAB, ZIP, RAR) в его же директорию\n"
     "cabine.exe -e <архив> [...]       распаковать архив в поддиректорию с его именем\n"
     "cabine.exe -ei <архив> [...]      распаковать архив в директорию, заданную в окне\n"
+    "cabine.exe -c <архив> [...]       преобразовать архив (ZIP, RAR, 7Z, TAR...) в <имя>.cab\n"
+    "                                  рядом с ним, сжатие максимальное; исходный не удаляется\n"
     "cabine.exe --register             добавить пункты в контекстное меню Проводника\n"
     "                                  и директорию программы в Path пользователя\n"
     "cabine.exe --unregister           убрать пункты меню и директорию из Path\n"
@@ -130,12 +132,13 @@ int main()
         }
         if (opt == "--register" || opt == "--unregister")
             return shellMenu(opt == "--register");
-        if (opt == "-a" || opt == "-ai" || opt == "-x" || opt == "-e" || opt == "-ei")
+        if (opt == "-a" || opt == "-ai" || opt == "-x" || opt == "-e" || opt == "-ei" || opt == "-c")
         {
             batch = opt == "-a"  ? BatchMode::Add
                   : opt == "-ai" ? BatchMode::AddAsk
                   : opt == "-x"  ? BatchMode::Extract
                   : opt == "-e"  ? BatchMode::ExtractToDir
+                  : opt == "-c"  ? BatchMode::Convert
                                  : BatchMode::ExtractAsk;
             std::vector<std::string> rest(args.begin() + 1, args.end());
             for (const std::string &a : joinSplitPaths(rest))

@@ -16,7 +16,7 @@ class TPanelWindow;
 // Пакетный режим командной строки: действие выполняется, и программа завершается.
 // Extract — в директорию архива, ExtractToDir — в поддиректорию с именем архива.
 // AddAsk и ExtractAsk сначала показывают окно с предлагаемым путём.
-enum class BatchMode { None, Add, AddAsk, Extract, ExtractToDir, ExtractAsk };
+enum class BatchMode { None, Add, AddAsk, Extract, ExtractToDir, ExtractAsk, Convert };
 
 class TCabineApp : public TApplication
 {
@@ -48,6 +48,7 @@ private:
     void runBatch();
     void batchAdd(bool ask);
     void batchExtract(bool toOwnDir, bool ask);
+    void batchConvert();
     void newArchive();
     void openArchiveDialog();
     void options();

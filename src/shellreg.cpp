@@ -15,8 +15,13 @@ const wchar_t *const kMenuKey = L"AllFilesystemObjects\\shell\\Cabine";
 const wchar_t *const kOpenKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\01open";
 const wchar_t *const kExtractKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\02extract";
 const wchar_t *const kExtractToKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\03extractto";
-const wchar_t *const kAddKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\04add";
-const wchar_t *const kAddToKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\05addto";
+const wchar_t *const kConvertKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\04convert";
+const wchar_t *const kAddKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\05add";
+const wchar_t *const kAddToKey = L"AllFilesystemObjects\\shell\\Cabine\\shell\\06addto";
+// «Преобразовать в CAB» — для архивов других форматов.
+const wchar_t *const kOnlyForeignArchives =
+    L"System.FileExtension:=.zip OR System.FileExtension:=.rar OR System.FileExtension:=.7z OR "
+    L"System.FileExtension:=.gz OR System.FileExtension:=.tgz OR System.FileExtension:=.tar";
 const wchar_t *const kOnlyArchives =
     L"System.FileExtension:=.cab OR System.FileExtension:=.zip OR System.FileExtension:=.rar OR "
     L"System.FileExtension:=.7z OR System.FileExtension:=.gz OR System.FileExtension:=.tgz OR "
@@ -129,6 +134,8 @@ bool registerShellMenu(const std::string &cabineExe, const std::string &shellExe
                    quoted(shellExe) + L" -x \"%1\"", L"Player", kOnlyArchives}, err) &&
         writeVerb({kExtractToKey, L"Извлечь в ...", icon,
                    quoted(shellExe) + L" -ei \"%1\"", L"Player", kOnlyArchives}, err) &&
+        writeVerb({kConvertKey, L"Преобразовать в CAB", icon,
+                   quoted(shellExe) + L" -c \"%1\"", L"Player", kOnlyForeignArchives}, err) &&
         writeVerb({kAddKey, L"Добавить в CAB-архив", icon,
                    quoted(shellExe) + L" -a \"%1\"", L"Player", nullptr}, err) &&
         writeVerb({kAddToKey, L"Добавить в архив ...", icon,
