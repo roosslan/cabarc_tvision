@@ -1,5 +1,5 @@
-# TAR.GZ, созданный системным tar.exe: вход, просмотр файла (F3), свойства.
-#targz {DATA} | src | {WORK}\tgz\proj.tar.gz
+# TAR.GZ, созданный системным tar.exe (tests/data/src.tar.gz): вход, просмотр файла (F3), свойства.
+#copy {TESTDATA}\src.tar.gz | {WORK}\tgz\proj.tar.gz
 size 100 30
 run "{CABINE}" "{WORK}\tgz\proj.tar.gz"
 waitfor 5000 src
