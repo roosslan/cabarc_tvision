@@ -37,6 +37,7 @@ struct PanelItem
     uint16_t attribs = 0;
     int entry = -1;             // индекс записи архива для файла в архиве
     bool cab = false;           // файл — CAB-архив
+    bool encrypted = false;     // файл в архиве зашифрован
     std::wstring wName, wExt;   // ключи сортировки
 };
 
