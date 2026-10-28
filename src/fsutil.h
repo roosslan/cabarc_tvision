@@ -84,8 +84,14 @@ std::string exePath();
 void printConsole(const std::string &text);   // вывод UTF-8 в консоль
 // Заголовок окна консоли и значок программы (ресурс 1) вместо значка conhost.
 void setConsoleTitleAndIcon(const std::string &title);
-// Удаление файлов и директорий (с содержимым) в корзину.
-bool recycle(const std::vector<std::string> &paths, std::string &err);
+// Удаление файлов и директорий (с содержимым) в корзину либо, при permanent, безвозвратно.
+bool recycle(const std::vector<std::string> &paths, std::string &err, bool permanent = false);
+// Попадут ли удалённые с тома объекты в корзину: у сетевых и съёмных дисков
+// её нет, кроме того, корзина может быть отключена в её свойствах.
+bool hasRecycleBin(const std::string &path);
+// Переименование файла или директории в пределах тома; существующий объект
+// с новым именем не заменяется.
+bool renamePath(const std::string &from, const std::string &to, std::string &err);
 
 // Настройки приложения в %APPDATA%\Cabine\cabine.ini.
 std::string loadSetting(const std::string &key, const std::string &def);

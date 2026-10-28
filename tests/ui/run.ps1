@@ -8,10 +8,10 @@
 # Служебные строки (аргументы разделяются символом |), выполняются до запуска:
 #   #copy ИСТОЧНИК | НАЗНАЧЕНИЕ      #copydir ИСТОЧНИК | НАЗНАЧЕНИЕ     #remove ПУТЬ
 #   #random ПУТЬ | БАЙТ              #zip ДИРЕКТОРИЯ | ФАЙЛ.zip
-#   #targz РОДИТЕЛЬ | ИМЯ | ФАЙЛ.tar.gz   (системный tar.exe)
 #   #concat ФАЙЛ | ФАЙЛ | РЕЗУЛЬТАТ       (склейка, например программа + архив = SFX)
 # и после завершения сценария:
 #   #expect-file ПУТЬ                #expect-same ДИРЕКТОРИЯ | ДИРЕКТОРИЯ
+#   #expect-missing ПУТЬ
 #   #expect-contains ФАЙЛ | ТЕКСТ
 # Настройки программы хранятся в {WORK}\settings (переменная CABINE_SETTINGS_DIR),
 # настройки пользователя не затрагиваются.
@@ -87,11 +87,6 @@ function Setup([string]$cmd, [string[]]$a) {
             Add-Type -AssemblyName System.IO.Compression.FileSystem
             [IO.Compression.ZipFile]::CreateFromDirectory($a[0], $a[1])
         }
-        'targz' {
-            EnsureParent $a[2]
-            & (Join-Path $env:SystemRoot 'System32\tar.exe') -czf $a[2] -C $a[0] $a[1]
-            if ($LASTEXITCODE -ne 0) { throw "tar.exe: код $LASTEXITCODE" }
-        }
         default { return $false }
     }
     return $true
@@ -118,6 +113,7 @@ function SameTree([string]$a, [string]$b) {
 function Check([string]$cmd, [string[]]$a) {
     switch ($cmd) {
         'expect-file' { if (-not (Test-Path -LiteralPath $a[0])) { return "нет файла $($a[0])" } }
+        'expect-missing' { if (Test-Path -LiteralPath $a[0]) { return "остался $($a[0])" } }
         'expect-same' { return (SameTree $a[0] $a[1]) }
         'expect-contains' {
             if (-not (Test-Path -LiteralPath $a[0])) { return "нет файла $($a[0])" }
