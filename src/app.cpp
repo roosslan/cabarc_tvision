@@ -343,6 +343,8 @@ void TCabineApp::runBatch()
     deskTop->drawView();
     if (batch == BatchMode::Add || batch == BatchMode::AddAsk)
         batchAdd(batch == BatchMode::AddAsk);
+    else if (batch == BatchMode::Convert)
+        batchConvert();
     else
         batchExtract(batch == BatchMode::ExtractToDir, batch == BatchMode::ExtractAsk);
     batchPaths.clear();
@@ -525,6 +527,92 @@ void TCabineApp::batchExtract(bool toOwnDir, bool ask)
                     return false;
                 }
                 err += (err.empty() ? "" : "\n\n") + fsu::baseName(cab) + ": " + e;
+            }
+        }
+        return err.empty();
+    }, kBatchHoldMs);
+}
+
+// -c: архив другого формата (ZIP, RAR, 7Z, GZ, TAR, TAR.GZ) распаковывается во
+// временную директорию и упаковывается в <имя>.cab рядом с ним со структурой
+// директорий как в исходном, с максимальным сжатием (LZX:21). Исходный архив
+// не удаляется. Занятое имя заменяется на «имя (2).cab» и т. д.
+void TCabineApp::batchConvert()
+{
+    std::vector<std::string> archives;
+    std::string missing;
+    for (const std::string &p : batchPaths)
+    {
+        std::string full = fsu::fullPath(p);
+        if (fsu::fileExists(full))
+            archives.push_back(full);
+        else
+            missing += "\n" + full;
+    }
+    if (!missing.empty())
+        showError("Не найдены:" + missing);
+    if (archives.empty())
+        return;
+
+    const CompressionSpec maximum = {CabCompression::LZX, 21};
+    runWithProgress("Преобразование в CAB", [&](CabProgress *p, std::string &err) {
+        for (const std::string &arc : archives)
+        {
+            std::string name = fsu::baseName(arc), e;
+            auto fail = [&](const std::string &msg) {
+                err += (err.empty() ? "" : "\n\n") + name + ": " + msg;
+            };
+            ArchiveFormat format = archiveFormat(arc, true);
+            if (format == ArchiveFormat::Cab)
+            {
+                fail("уже архив CAB");
+                continue;
+            }
+            if (format == ArchiveFormat::Unknown)
+            {
+                fail("не является архивом ZIP, RAR, 7Z, GZ или TAR");
+                continue;
+            }
+            std::string dir = fsu::dirName(arc), stem = archiveStem(arc);
+            std::string cab = fsu::joinPath(dir, stem + ".cab");
+            for (int n = 2; fsu::fileExists(cab) || fsu::dirExists(cab); ++n)
+                cab = fsu::joinPath(dir, stem + " (" + std::to_string(n) + ").cab");
+
+            std::string temp = newTempDir();
+            if (temp.empty())
+            {
+                fail("не удалось создать временную директорию");
+                continue;
+            }
+            p->onStage("Распаковка " + name);
+            bool ok = archExtract(arc, temp, {}, true, Overwrite::Always, p, e);
+            std::vector<fsu::FoundFile> found;
+            if (ok && !fsu::collectFiles(fsu::joinPath(temp, "*"), true, true, found, e))
+                ok = false;
+            if (ok && found.empty())
+            {
+                e = "в архиве нет файлов";
+                ok = false;
+            }
+            if (ok)
+            {
+                std::vector<CabSource> sources;
+                for (const fsu::FoundFile &f : found)
+                    sources.push_back({f.path, f.name});
+                p->onStage("Создание " + fsu::baseName(cab));
+                ok = cabCreate(cab, sources, maximum, p, e);
+                if (!ok)
+                    fsu::removeFile(cab);   // недоделанный архив не оставляется
+            }
+            fsu::removeTree(temp);
+            if (!ok)
+            {
+                if (e == kCabCancelled)
+                {
+                    err = e;
+                    return false;
+                }
+                fail(e);
             }
         }
         return err.empty();
