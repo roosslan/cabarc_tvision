@@ -830,25 +830,14 @@ void testTarGz(const std::string &root, const std::string &big)
           archiveStem("b.gz") == "b" && archiveStem("Отчёт.zip") == "Отчёт",
           "archiveStem: .tar.gz снимается целиком");
 
-    // Архив, созданный системным tar.exe (bsdtar, есть в Windows 10 1803 и новее).
-    wchar_t sys[MAX_PATH];
-    GetSystemDirectoryW(sys, MAX_PATH);
-    std::string tarExe = fsu::joinPath(fsu::narrow(sys), "tar.exe");
-    if (fsu::fileExists(tarExe))
-    {
-        std::string src = fsu::joinPath(dir, "systar_src");
-        writeFile(fsu::joinPath(src, "Отчёт.txt"), "из tar.exe");
-        writeFile(fsu::joinPath(src, "inner\\b.txt"), "b");
-        std::string sysTgz = fsu::joinPath(dir, "system.tgz");
-        int code = runProcess("\"" + tarExe + "\" -czf \"" + sysTgz + "\" -C \"" + src + "\" .");
-        check(code == 0, "tar.exe создал архив (код " + std::to_string(code) + ")");
-        std::string so = fsu::joinPath(dir, "out_system");
-        ok = archExtract(sysTgz, so, {}, true, Overwrite::Always, nullptr, err, &res);
-        check(ok && readFile(fsu::joinPath(so, "inner\\b.txt")) == "b", "распаковка архива tar.exe " + err);
-        check(readFile(fsu::joinPath(so, "Отчёт.txt")) == "из tar.exe", "кириллическое имя из tar.exe");
-    }
-    else
-        fsu::printConsole("пропущено: нет tar.exe\n");
+    // Архив, созданный системным tar.exe (bsdtar): tests/data/systar.tgz с файлами
+    // «Отчёт.txt» и «inner\b.txt». Образец создан заранее: tar.exe на раннерах
+    // GitHub падает при упаковке кириллических имён.
+    std::string sysTgz = fsu::joinPath(CABINE_TEST_DATA, "systar.tgz");
+    std::string so = fsu::joinPath(dir, "out_system");
+    ok = archExtract(sysTgz, so, {}, true, Overwrite::Always, nullptr, err, &res);
+    check(ok && readFile(fsu::joinPath(so, "inner\\b.txt")) == "b", "распаковка архива tar.exe " + err);
+    check(readFile(fsu::joinPath(so, "Отчёт.txt")) == "из tar.exe", "кириллическое имя из tar.exe");
 }
 
 void test7z(const std::string &root)
