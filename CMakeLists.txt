@@ -88,8 +88,11 @@ add_library(cabine_minizip STATIC
     ${MZ}/mz_crypt_winvista.c ${MZ}/mz_crypt_winxp.c
 )
 target_include_directories(cabine_minizip PUBLIC "${MZ}" "${CMAKE_CURRENT_BINARY_DIR}/minizip")
+# _WIN32_WINNT — Windows 7: иначе minizip-ng вызывает CreateFile2 (Windows 8+),
+# и cabine.exe не запускается на Windows 7.
 target_compile_definitions(cabine_minizip PRIVATE
-    HAVE_ZLIB ZLIB_COMPAT HAVE_PKCRYPT HAVE_WZAES _CRT_SECURE_NO_DEPRECATE _CRT_NONSTDC_NO_DEPRECATE)
+    HAVE_ZLIB ZLIB_COMPAT HAVE_PKCRYPT HAVE_WZAES _CRT_SECURE_NO_DEPRECATE _CRT_NONSTDC_NO_DEPRECATE
+    _WIN32_WINNT=0x0601)
 target_link_libraries(cabine_minizip PUBLIC cabine_zlib bcrypt ncrypt crypt32)
 if (MSVC)
     target_compile_options(cabine_minizip PRIVATE /W0)
