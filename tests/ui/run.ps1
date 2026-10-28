@@ -13,7 +13,7 @@
 #   #expect-file ПУТЬ                #expect-same ДИРЕКТОРИЯ | ДИРЕКТОРИЯ
 #   #expect-missing ПУТЬ
 #   #expect-contains ФАЙЛ | ТЕКСТ
-#   #expect-cab-same ФАЙЛ.cab | ДИРЕКТОРИЯ  (CAB распаковывается системным tar.exe)
+#   #expect-cab-same ФАЙЛ.cab | ДИРЕКТОРИЯ  (CAB распаковывается системным expand.exe)
 # Настройки программы хранятся в {WORK}\settings (переменная CABINE_SETTINGS_DIR),
 # настройки пользователя не затрагиваются.
 param(
@@ -118,11 +118,11 @@ function Check([string]$cmd, [string[]]$a) {
         'expect-same' { return (SameTree $a[0] $a[1]) }
         'expect-cab-same' {
             if (-not (Test-Path -LiteralPath $a[0])) { return "нет файла $($a[0])" }
-            $out = "$($a[0]).tar-out"
+            $out = "$($a[0]).out"
             if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force }
             New-Item -ItemType Directory $out | Out-Null
-            & (Join-Path $env:SystemRoot 'System32\tar.exe') -xf $a[0] -C $out
-            if ($LASTEXITCODE -ne 0) { return "tar.exe не распаковал $($a[0]): код $LASTEXITCODE" }
+            & (Join-Path $env:SystemRoot 'System32\expand.exe') $a[0] '-F:*' $out | Out-Null
+            if ($LASTEXITCODE -ne 0) { return "expand.exe не распаковал $($a[0]): код $LASTEXITCODE" }
             return (SameTree $a[1] $out)
         }
         'expect-contains' {

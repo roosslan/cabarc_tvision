@@ -4,7 +4,7 @@
 #copy {TESTDATA}\sample.7z | {WORK}\conv\s7.7z
 #copy {TESTDATA}\sample5.rar | {WORK}\conv\srar.rar
 #zip {DATA}\src | {WORK}\conv\szip.zip
-#targz {DATA} | src | {WORK}\conv\stgz.tar.gz
+#copy {TESTDATA}\src.tar.gz | {WORK}\conv\stgz.tar.gz
 #copy {DATA}\test.cab | {WORK}\conv\szip.cab
 size 100 30
 run "{CABINE}" -c "{WORK}\conv\s7.7z" "{WORK}\conv\srar.rar" "{WORK}\conv\szip.zip" "{WORK}\conv\stgz.tar.gz"
