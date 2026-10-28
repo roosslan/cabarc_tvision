@@ -8,7 +8,6 @@
 # Служебные строки (аргументы разделяются символом |), выполняются до запуска:
 #   #copy ИСТОЧНИК | НАЗНАЧЕНИЕ      #copydir ИСТОЧНИК | НАЗНАЧЕНИЕ     #remove ПУТЬ
 #   #random ПУТЬ | БАЙТ              #zip ДИРЕКТОРИЯ | ФАЙЛ.zip
-#   #targz РОДИТЕЛЬ | ИМЯ | ФАЙЛ.tar.gz   (системный tar.exe)
 # и после завершения сценария:
 #   #expect-file ПУТЬ                #expect-same ДИРЕКТОРИЯ | ДИРЕКТОРИЯ
 #   #expect-missing ПУТЬ
@@ -81,11 +80,6 @@ function Setup([string]$cmd, [string[]]$a) {
             # если скрипт запущен из PowerShell 7 (так на раннерах GitHub).
             Add-Type -AssemblyName System.IO.Compression.FileSystem
             [IO.Compression.ZipFile]::CreateFromDirectory($a[0], $a[1])
-        }
-        'targz' {
-            EnsureParent $a[2]
-            & (Join-Path $env:SystemRoot 'System32\tar.exe') -czf $a[2] -C $a[0] $a[1]
-            if ($LASTEXITCODE -ne 0) { throw "tar.exe: код $LASTEXITCODE" }
         }
         default { return $false }
     }
