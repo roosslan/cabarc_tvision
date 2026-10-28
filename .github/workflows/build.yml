@@ -73,6 +73,7 @@ jobs:
             '"build\Release\cabine.exe"'
             '"build\Release\cabine-shell.exe"'
             '"README.md"'
+            '"readme.ru.md"'
           )
           $ddf | Set-Content -Encoding ascii package.ddf
           makecab.exe /F package.ddf
