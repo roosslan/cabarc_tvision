@@ -63,6 +63,15 @@ std::string readFile(const std::string &path)
     return d;
 }
 
+// У всех файлов архива признак шифрования равен expected.
+bool allEncrypted(const CabInfo &info, bool expected)
+{
+    for (const CabEntry &e : info.entries)
+        if (e.encrypted != expected)
+            return false;
+    return !info.entries.empty();
+}
+
 bool hasEntry(const CabInfo &info, const std::string &name)
 {
     for (const CabEntry &e : info.entries)
@@ -478,6 +487,7 @@ void testZip(const std::string &root, const std::string &big)
     CabInfo info;
     check(archRead(zip, info, err) && info.entries.size() == 5 && info.format == ArchiveFormat::Zip,
           "archRead: 5 файлов " + err);
+    check(allEncrypted(info, false), "ZIP без пароля: файлы не помечены как зашифрованные");
     check(hasEntry(info, "Документ.txt") && hasEntry(info, "sub\\Вложенный\\data.bin"),
           "кириллические имена и вложенные пути");
     check(info.method == "Deflate", "метод сжатия: " + info.method);
@@ -527,6 +537,7 @@ void testZip(const std::string &root, const std::string &big)
               std::string("создан зашифрованный ") + e.file);
         CabInfo ei;
         check(archRead(path, ei, err) && ei.entries.size() == 2, "список зашифрованного архива читается без пароля");
+        check(allEncrypted(ei, true), std::string(e.file) + ": файлы помечены как зашифрованные");
         resetPasswords({"неверный", "Пароль1"});
         std::string eo = fsu::joinPath(dir, std::string("out_") + e.file);
         check(archExtract(path, eo, {}, true, Overwrite::Always, nullptr, err, &res) && res.files == 2,
@@ -605,6 +616,7 @@ void testRar(const std::string &root)
     // Пароль на данные: список читается, распаковка спрашивает пароль.
     std::string secret = fsu::joinPath(data, "secret5.rar");
     check(archRead(secret, info, err) && info.entries.size() == 3, "список RAR с паролем читается без пароля");
+    check(allEncrypted(info, true), "RAR с паролем: файлы помечены как зашифрованные");
     resetPasswords({"Пароль1"});
     std::string so = fsu::joinPath(dir, "secret");
     check(archExtract(secret, so, {}, true, Overwrite::Always, nullptr, err, &res) && res.files == 3,
@@ -855,6 +867,7 @@ void test7z(const std::string &root)
         bool ok = archRead(path, info, err);
         check(ok && info.entries.size() == 3 && info.format == ArchiveFormat::SevenZip, what + ": 3 файла " + err);
         check(hasEntry(info, "Документ.txt") && hasEntry(info, "sub\\Вложенный\\data.bin"), what + ": имена");
+        check(allEncrypted(info, false), what + ": файлы не помечены как зашифрованные");
         ok = archTest(path, nullptr, err, &res);
         check(ok && res.files == 3, what + ": проверка " + err);
         std::string out = fsu::joinPath(dir, s.file);
@@ -886,6 +899,7 @@ void test7z(const std::string &root)
     ok = archRead(secret, info, err);
     check(ok && info.entries.size() == 3 && info.method == "7z, пароль" && g_script.asked == 0,
           "список 7z с паролем на данные читается без пароля " + err);
+    check(allEncrypted(info, true), "7z с паролем: файлы помечены как зашифрованные");
     std::string so = fsu::joinPath(dir, "secret");
     ok = archExtract(secret, so, {}, true, Overwrite::Always, nullptr, err, &res);
     check(!ok && g_script.asked == 0, "без пароля 7z не распаковывается");

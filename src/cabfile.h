@@ -27,6 +27,7 @@ struct CabEntry
     uint16_t attribs = 0;
     uint16_t folder = 0;
     uint32_t index = 0;     // порядковый номер в архиве
+    bool encrypted = false; // файл зашифрован (ZIP, RAR, 7z); в панели — « *» после имени
 };
 
 struct CabInfo

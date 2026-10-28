@@ -290,6 +290,7 @@ bool zipRead(const std::string &path, CabInfo &info, std::string &err)
         toDos(fi->modified_date, e.date, e.time);
         e.attribs = zipAttribs(fi);
         e.index = index;
+        e.encrypted = (fi->flag & MZ_ZIP_FLAG_ENCRYPTED) != 0;
         info.totalSize += e.size;
         methods.push_back(zipMethod(fi));
         info.entries.push_back(std::move(e));
@@ -605,6 +606,7 @@ bool rarReadOnce(const std::string &path, CabInfo &info, std::string &err, bool 
             e.time = uint16_t(hd->FileTime & 0xFFFF);
             e.attribs = rarAttribs(*hd);
             e.index = index;
+            e.encrypted = (hd->Flags & RHDF_ENCRYPTED) != 0;
             info.totalSize += e.size;
             std::string m = hd->UnpVer >= 50 ? "RAR5" : "RAR4";
             if (hd->Flags & RHDF_ENCRYPTED)
@@ -1376,17 +1378,29 @@ public:
     bool encrypted() const
     {
         for (UInt32 f = 0; f < db.db.NumFolders; ++f)
-        {
-            CSzFolder folder;
-            CSzData sd;
-            sd.Data = db.db.CodersData + db.db.FoCodersOffsets[f];
-            sd.Size = db.db.FoCodersOffsets[f + 1] - db.db.FoCodersOffsets[f];
-            if (SzGetNextFolderItem(&folder, &sd) != SZ_OK)
-                continue;
-            for (UInt32 c = 0; c < folder.NumCoders; ++c)
-                if (folder.Coders[c].MethodID == 0x6F10701)
-                    return true;
-        }
+            if (folderEncrypted(f))
+                return true;
+        return false;
+    }
+
+    // Зашифрован ли файл: AES в блоке, где он лежит. Пустой файл блока не имеет.
+    bool fileEncrypted(UInt32 i) const
+    {
+        UInt32 f = db.FileToFolder ? db.FileToFolder[i] : (UInt32) -1;
+        return f != (UInt32) -1 && folderEncrypted(f);
+    }
+
+    bool folderEncrypted(UInt32 f) const
+    {
+        CSzFolder folder;
+        CSzData sd;
+        sd.Data = db.db.CodersData + db.db.FoCodersOffsets[f];
+        sd.Size = db.db.FoCodersOffsets[f + 1] - db.db.FoCodersOffsets[f];
+        if (SzGetNextFolderItem(&folder, &sd) != SZ_OK)
+            return false;
+        for (UInt32 c = 0; c < folder.NumCoders; ++c)
+            if (folder.Coders[c].MethodID == 0x6F10701)
+                return true;
         return false;
     }
 
@@ -1516,6 +1530,7 @@ bool szRead(const std::string &path, CabInfo &info, std::string &err)
         e.size = z->size(i);
         z->dosTime(i, e.date, e.time);
         e.attribs = z->attribs(i);
+        e.encrypted = z->fileEncrypted(i);
         e.index = i;
         info.totalSize += e.size;
         info.entries.push_back(std::move(e));
