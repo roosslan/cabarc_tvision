@@ -19,6 +19,27 @@ std::wstring widen(const std::string &s)
     return w;
 }
 
+std::wstring sysPath(const std::string &path)
+{
+    std::wstring w = widen(path);
+    const size_t kShortLimit = 248;
+    if (w.size() < kShortLimit || w.compare(0, 4, L"\\\\?\\") == 0)
+        return w;
+    // Префикс \\?\ отключает разбор пути: путь должен быть полным,
+    // без «.», «..» и прямых косых — это делает GetFullPathName.
+    DWORD n = GetFullPathNameW(w.c_str(), 0, nullptr, nullptr);
+    if (n == 0)
+        return w;
+    std::wstring full(n, L'\0');
+    n = GetFullPathNameW(w.c_str(), n, &full[0], nullptr);
+    full.resize(n);
+    if (full.size() >= 3 && full[1] == L':' && full[2] == L'\\')
+        return L"\\\\?\\" + full;
+    if (full.size() >= 2 && full[0] == L'\\' && full[1] == L'\\')
+        return L"\\\\?\\UNC\\" + full.substr(2);
+    return w;
+}
+
 std::string narrow(const std::wstring &w)
 {
     if (w.empty())
@@ -71,7 +92,7 @@ bool isValidUtf8(const std::string &s)
 
 static DWORD attributes(const std::string &path)
 {
-    return GetFileAttributesW(widen(path).c_str());
+    return GetFileAttributesW(sysPath(path).c_str());
 }
 
 bool fileExists(const std::string &path)
@@ -93,13 +114,13 @@ bool makeDirs(const std::string &path)
     std::string parent = dirName(path);
     if (!parent.empty() && parent != path && !makeDirs(parent))
         return false;
-    return CreateDirectoryW(widen(path).c_str(), nullptr) ||
+    return CreateDirectoryW(sysPath(path).c_str(), nullptr) ||
         GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
 bool removeFile(const std::string &path)
 {
-    std::wstring w = widen(path);
+    std::wstring w = sysPath(path);
     SetFileAttributesW(w.c_str(), FILE_ATTRIBUTE_NORMAL);
     return DeleteFileW(w.c_str()) != FALSE;
 }
@@ -107,7 +128,7 @@ bool removeFile(const std::string &path)
 bool removeTree(const std::string &path)
 {
     WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileW(widen(joinPath(path, "*")).c_str(), &fd);
+    HANDLE h = FindFirstFileW(sysPath(joinPath(path, "*")).c_str(), &fd);
     if (h != INVALID_HANDLE_VALUE)
     {
         do
@@ -120,7 +141,7 @@ bool removeTree(const std::string &path)
             {
                 // Точки соединения удаляются как ссылки, без захода внутрь.
                 if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
-                    RemoveDirectoryW(widen(child).c_str());
+                    RemoveDirectoryW(sysPath(child).c_str());
                 else
                     removeTree(child);
             }
@@ -129,21 +150,21 @@ bool removeTree(const std::string &path)
         } while (FindNextFileW(h, &fd));
         FindClose(h);
     }
-    return RemoveDirectoryW(widen(path).c_str()) != FALSE;
+    return RemoveDirectoryW(sysPath(path).c_str()) != FALSE;
 }
 
 bool moveReplace(const std::string &from, const std::string &to)
 {
     if (fileExists(to))
         clearReadOnly(to);
-    return MoveFileExW(widen(from).c_str(), widen(to).c_str(),
+    return MoveFileExW(sysPath(from).c_str(), sysPath(to).c_str(),
                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED |
                        MOVEFILE_WRITE_THROUGH) != FALSE;
 }
 
 void clearReadOnly(const std::string &path)
 {
-    std::wstring w = widen(path);
+    std::wstring w = sysPath(path);
     DWORD a = GetFileAttributesW(w.c_str());
     if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_READONLY))
         SetFileAttributesW(w.c_str(), a & ~FILE_ATTRIBUTE_READONLY);
@@ -152,7 +173,7 @@ void clearReadOnly(const std::string &path)
 uint64_t fileSize(const std::string &path)
 {
     WIN32_FILE_ATTRIBUTE_DATA fad;
-    if (!GetFileAttributesExW(widen(path).c_str(), GetFileExInfoStandard, &fad))
+    if (!GetFileAttributesExW(sysPath(path).c_str(), GetFileExInfoStandard, &fad))
         return 0;
     return (uint64_t(fad.nFileSizeHigh) << 32) | fad.nFileSizeLow;
 }
@@ -162,7 +183,7 @@ bool readFile(const std::string &path, std::string &data, uint64_t maxSize)
     uint64_t size = fileSize(path);
     if (size > maxSize)
         return false;
-    FILE *f = _wfopen(widen(path).c_str(), L"rb");
+    FILE *f = _wfopen(sysPath(path).c_str(), L"rb");
     if (!f)
         return false;
     data.resize((size_t) size);
@@ -305,7 +326,7 @@ std::string makeTempDir()
         snprintf(suffix, sizeof(suffix), "Cabine-%lu-%lu",
                  GetCurrentProcessId(), (unsigned long) (GetTickCount() + i));
         std::string dir = joinPath(base, suffix);
-        if (CreateDirectoryW(widen(dir).c_str(), nullptr))
+        if (CreateDirectoryW(sysPath(dir).c_str(), nullptr))
             return dir;
         if (GetLastError() != ERROR_ALREADY_EXISTS)
             break;
@@ -393,7 +414,7 @@ bool wildMatch(const std::string &masks, const std::string &name)
 bool listDirectory(const std::string &dir, std::vector<DirItem> &out)
 {
     WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileExW(widen(joinPath(dir, "*")).c_str(), FindExInfoBasic, &fd,
+    HANDLE h = FindFirstFileExW(sysPath(joinPath(dir, "*")).c_str(), FindExInfoBasic, &fd,
                                 FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
     if (h == INVALID_HANDLE_VALUE)
         return GetLastError() == ERROR_FILE_NOT_FOUND;  // пустой корень диска
@@ -463,7 +484,7 @@ static void walk(const std::string &dir, const std::string &prefix, const std::s
                  bool recurse, bool keepPaths, std::vector<FoundFile> &out)
 {
     WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileExW(widen(joinPath(dir, "*")).c_str(), FindExInfoBasic, &fd,
+    HANDLE h = FindFirstFileExW(sysPath(joinPath(dir, "*")).c_str(), FindExInfoBasic, &fd,
                                 FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
     if (h == INVALID_HANDLE_VALUE)
         return;
@@ -635,7 +656,7 @@ bool hasRecycleBin(const std::string &path)
 
 bool renamePath(const std::string &from, const std::string &to, std::string &err)
 {
-    if (MoveFileExW(widen(from).c_str(), widen(to).c_str(), 0))
+    if (MoveFileExW(sysPath(from).c_str(), sysPath(to).c_str(), 0))
         return true;
     err = lastErrorText();
     return false;
@@ -689,7 +710,7 @@ static std::wstring settingsFile()
     if (!fileExists(ini))
     {
         // Файл в UTF-16 с BOM: тогда Private Profile API хранит строки в Юникоде.
-        if (FILE *f = _wfopen(widen(ini).c_str(), L"wb"))
+        if (FILE *f = _wfopen(sysPath(ini).c_str(), L"wb"))
         {
             fputc(0xFF, f);
             fputc(0xFE, f);
@@ -784,7 +805,7 @@ bool runDetached(const std::string &commandLine, std::string &err)
 uint64_t fileWriteTime(const std::string &path)
 {
     WIN32_FILE_ATTRIBUTE_DATA fad;
-    if (!GetFileAttributesExW(widen(path).c_str(), GetFileExInfoStandard, &fad))
+    if (!GetFileAttributesExW(sysPath(path).c_str(), GetFileExInfoStandard, &fad))
         return 0;
     return (uint64_t(fad.ftLastWriteTime.dwHighDateTime) << 32) | fad.ftLastWriteTime.dwLowDateTime;
 }

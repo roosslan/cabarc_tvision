@@ -49,7 +49,7 @@ void section(const std::string &name)
 void writeFile(const std::string &path, const std::string &data)
 {
     fsu::makeDirs(fsu::dirName(path));
-    FILE *f = _wfopen(fsu::widen(path).c_str(), L"wb");
+    FILE *f = _wfopen(fsu::sysPath(path).c_str(), L"wb");
     if (!f)
         return;
     fwrite(data.data(), 1, data.size(), f);
@@ -924,6 +924,28 @@ void test7z(const std::string &root)
     check(hasArchiveExtension("a.7Z") && archiveStem("архив.7z") == "архив", "расширение .7z");
 }
 
+// Пути длиннее MAX_PATH (260): создание директорий, запись, архивирование и распаковка.
+void testLongPaths(const std::string &root)
+{
+    section("Длинные пути");
+    std::string deep = fsu::joinPath(root, "long\\" + std::string(100, 'a') + "\\" + std::string(100, 'b'));
+    check(fsu::makeDirs(deep) && fsu::dirExists(deep), "директория с путём длиннее 200 символов");
+    std::string file = fsu::joinPath(deep, std::string(80, 'c') + ".txt");
+    writeFile(file, "длинный путь");
+    check(file.size() > 300 && readFile(file) == "длинный путь", "файл с путём длиннее 300 символов");
+
+    std::string err;
+    std::string cab = fsu::joinPath(root, "long.cab");
+    check(cabCreate(cab, {{file, "в\\" + std::string(150, 'd') + "\\файл.txt"}}, CompressionSpec(), nullptr, err),
+          "CAB из файла с длинным путём " + err);
+    std::string out = fsu::joinPath(deep, "out");
+    check(archExtract(cab, out, {}, true, Overwrite::Always, nullptr, err),
+          "распаковка CAB в директорию с длинным путём " + err);
+    std::string extracted = fsu::joinPath(out, "в\\" + std::string(150, 'd') + "\\файл.txt");
+    check(extracted.size() > 400 && readFile(extracted) == "длинный путь", "распакованный файл (путь > 400 символов)");
+    check(fsu::removeTree(fsu::joinPath(root, "long")) && !fsu::dirExists(deep), "удаление дерева с длинными путями");
+}
+
 void testDetection(const std::string &root)
 {
     section("Определение формата");
@@ -1046,6 +1068,7 @@ int main()
     testRar(root);
     testTarGz(root, big);
     test7z(root);
+    testLongPaths(root);
     testDetection(root);
     testUserPath();
 

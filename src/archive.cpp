@@ -86,7 +86,7 @@ void toDos(time_t t, uint16_t &date, uint16_t &time)
 
 void applyFileInfo(const std::string &path, uint16_t date, uint16_t time, uint16_t attribs)
 {
-    std::wstring w = fsu::widen(path);
+    std::wstring w = fsu::sysPath(path);
     HANDLE h = CreateFileW(w.c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE,
                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h != INVALID_HANDLE_VALUE)
@@ -368,7 +368,7 @@ bool zipExtract(ExtractJob &j)
                 return false;
             if (t == Target::Skip)
                 continue;
-            sink.fd = _wopen(fsu::widen(out).c_str(), _O_BINARY | _O_CREAT | _O_TRUNC | _O_WRONLY,
+            sink.fd = _wopen(fsu::sysPath(out).c_str(), _O_BINARY | _O_CREAT | _O_TRUNC | _O_WRONLY,
                              _S_IREAD | _S_IWRITE);
             if (sink.fd == -1)
             {
@@ -730,7 +730,7 @@ class Source
 public:
     Source(const std::string &path, bool gzip) : gzip(gzip)
     {
-        std::wstring w = fsu::widen(path);
+        std::wstring w = fsu::sysPath(path);
         if (gzip)
             gz = gzopen_w(w.c_str(), "rb");
         else
@@ -1041,7 +1041,7 @@ struct GzHeader
 
 bool readGzHeader(const std::string &path, GzHeader &g)
 {
-    FILE *f = _wfopen(fsu::widen(path).c_str(), L"rb");
+    FILE *f = _wfopen(fsu::sysPath(path).c_str(), L"rb");
     if (!f)
         return false;
     uint8_t h[10];
@@ -1154,7 +1154,7 @@ bool writeTarget(ExtractJob &j, const std::string &name, uint64_t size, time_t m
             return false;
         if (t == Target::Skip)
             return true;
-        fd = _wopen(fsu::widen(out).c_str(), _O_BINARY | _O_CREAT | _O_TRUNC | _O_WRONLY,
+        fd = _wopen(fsu::sysPath(out).c_str(), _O_BINARY | _O_CREAT | _O_TRUNC | _O_WRONLY,
                     _S_IREAD | _S_IWRITE);
         if (fd == -1)
         {
@@ -1297,7 +1297,7 @@ public:
         static bool crcReady = (CrcGenerateTable(), true);
         (void) crcReady;
         SzArEx_Init(&db);
-        std::wstring w = fsu::widen(path);
+        std::wstring w = fsu::sysPath(path);
         if (InFile_OpenW(&file.file, w.c_str()) != 0)
         {
             result = SZ_ERROR_READ;
@@ -1628,7 +1628,7 @@ bool runJob(ArchiveFormat format, ExtractJob &j, std::string &err, CabResult *re
 ArchiveFormat archiveFormat(const std::string &path, bool sfx)
 {
     unsigned char sig[kTarBlock] = {};
-    FILE *f = _wfopen(fsu::widen(path).c_str(), L"rb");
+    FILE *f = _wfopen(fsu::sysPath(path).c_str(), L"rb");
     if (!f)
         return ArchiveFormat::Unknown;
     size_t n = fread(sig, 1, sizeof(sig), f);

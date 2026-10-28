@@ -10,6 +10,10 @@
 namespace fsu {
 
 std::wstring widen(const std::string &s);
+// Путь для функций файловой системы Windows. Длинный абсолютный путь (от 248
+// символов, предел MAX_PATH с запасом для имени файла) получает префикс «\\?\»,
+// сетевой — «\\?\UNC\»; без него CreateFile, CreateDirectory и др. такой путь не принимают.
+std::wstring sysPath(const std::string &path);
 std::string narrow(const std::wstring &s);
 std::string fromCodePage(const std::string &s, unsigned codePage);
 std::string upper(const std::string &s);
