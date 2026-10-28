@@ -594,7 +594,54 @@ void setConsoleTitleAndIcon(const std::string &title)
         SendMessageW(wnd, WM_SETICON, ICON_SMALL, (LPARAM) iconSmall);
 }
 
-bool recycle(const std::vector<std::string> &paths, std::string &err)
+bool hasRecycleBin(const std::string &path)
+{
+    wchar_t root[MAX_PATH + 1] = {};
+    if (!GetVolumePathNameW(widen(fullPath(path)).c_str(), root, MAX_PATH))
+        return false;
+    if (root[0] == L'\\' && root[1] == L'\\' && root[2] != L'?')
+        return false;   // UNC-путь: сетевой ресурс
+    switch (GetDriveTypeW(root))
+    {
+        case DRIVE_FIXED:
+            break;
+        default:        // сетевые, съёмные, CD, RAM-диски
+            return false;
+    }
+    SHQUERYRBINFO info = {sizeof(info)};
+    if (FAILED(SHQueryRecycleBinW(root, &info)))
+        return false;
+    // «Уничтожать файлы сразу после удаления, не помещая их в корзину» —
+    // параметр NukeOnDelete тома в HKCU\...\Explorer\BitBucket\Volume\{GUID}.
+    wchar_t volume[64] = {};
+    if (GetVolumeNameForVolumeMountPointW(root, volume, 64))
+    {
+        // Имя тома вида «\\?\Volume{GUID}», в реестре — только {GUID}.
+        std::wstring name = volume;
+        size_t open = name.find(L'{'), close = name.find(L'}');
+        if (open != std::wstring::npos && close != std::wstring::npos)
+        {
+            std::wstring key = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\BitBucket\\Volume\\" +
+                               name.substr(open, close - open + 1);
+            DWORD nuke = 0, size = sizeof(nuke);
+            if (RegGetValueW(HKEY_CURRENT_USER, key.c_str(), L"NukeOnDelete", RRF_RT_REG_DWORD, nullptr, &nuke,
+                             &size) == ERROR_SUCCESS &&
+                nuke != 0)
+                return false;
+        }
+    }
+    return true;
+}
+
+bool renamePath(const std::string &from, const std::string &to, std::string &err)
+{
+    if (MoveFileExW(widen(from).c_str(), widen(to).c_str(), 0))
+        return true;
+    err = lastErrorText();
+    return false;
+}
+
+bool recycle(const std::vector<std::string> &paths, std::string &err, bool permanent)
 {
     if (paths.empty())
         return true;
@@ -609,7 +656,7 @@ bool recycle(const std::vector<std::string> &paths, std::string &err)
     SHFILEOPSTRUCTW op = {};
     op.wFunc = FO_DELETE;
     op.pFrom = from.c_str();
-    op.fFlags = FOF_ALLOWUNDO | FOF_NO_UI;
+    op.fFlags = (permanent ? 0 : FOF_ALLOWUNDO) | FOF_NO_UI;
     int r = SHFileOperationW(&op);
     std::string left;
     for (const std::string &p : paths)

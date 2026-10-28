@@ -78,6 +78,7 @@ TMenuBar *TCabineApp::initMenuBar(TRect r)
             *new TMenuItem("~Д~обавить в архив...", cmAddFiles, kbAltA, hcNoContext, "Alt-A") +
             *new TMenuItem("~И~звлечь...", cmExtract, kbAltE, hcNoContext, "Alt-E") +
             *new TMenuItem("~У~далить", cmDeleteFiles, kbF8, hcNoContext, "F8, Del") +
+            *new TMenuItem("Переи~м~еновать...", cmRename, kbShiftF6, hcNoContext, "Shift-F6, F2") +
             newLine() +
             *new TMenuItem("~П~росмотр", cmViewFile, kbF3, hcNoContext, "F3") +
             *new TMenuItem("~Р~едактировать", cmEditFile, kbF4, hcNoContext, "F4") +
@@ -114,7 +115,8 @@ TStatusLine *TCabineApp::initStatusLine(TRect r)
             *new TStatusItem("~Alt-E~ Извлечь", kbAltE, cmExtract) +
             *new TStatusItem("~F8~ Удалить", kbF8, cmDeleteFiles) +
             *new TStatusItem("~F9~ Меню", kbF9, cmMenu) +
-            *new TStatusItem(0, kbAltF3, cmClose));
+            *new TStatusItem(0, kbAltF3, cmClose) +
+            *new TStatusItem(0, kbF2, cmRename));
 }
 
 void TCabineApp::getEvent(TEvent &event)
