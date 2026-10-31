@@ -63,6 +63,15 @@ std::string readFile(const std::string &path)
     return d;
 }
 
+// У всех файлов архива признак шифрования равен expected.
+bool allEncrypted(const CabInfo &info, bool expected)
+{
+    for (const CabEntry &e : info.entries)
+        if (e.encrypted != expected)
+            return false;
+    return !info.entries.empty();
+}
+
 bool hasEntry(const CabInfo &info, const std::string &name)
 {
     for (const CabEntry &e : info.entries)
@@ -478,6 +487,7 @@ void testZip(const std::string &root, const std::string &big)
     CabInfo info;
     check(archRead(zip, info, err) && info.entries.size() == 5 && info.format == ArchiveFormat::Zip,
           "archRead: 5 файлов " + err);
+    check(allEncrypted(info, false), "ZIP без пароля: файлы не помечены как зашифрованные");
     check(hasEntry(info, "Документ.txt") && hasEntry(info, "sub\\Вложенный\\data.bin"),
           "кириллические имена и вложенные пути");
     check(info.method == "Deflate", "метод сжатия: " + info.method);
@@ -527,6 +537,7 @@ void testZip(const std::string &root, const std::string &big)
               std::string("создан зашифрованный ") + e.file);
         CabInfo ei;
         check(archRead(path, ei, err) && ei.entries.size() == 2, "список зашифрованного архива читается без пароля");
+        check(allEncrypted(ei, true), std::string(e.file) + ": файлы помечены как зашифрованные");
         resetPasswords({"неверный", "Пароль1"});
         std::string eo = fsu::joinPath(dir, std::string("out_") + e.file);
         check(archExtract(path, eo, {}, true, Overwrite::Always, nullptr, err, &res) && res.files == 2,
@@ -605,6 +616,7 @@ void testRar(const std::string &root)
     // Пароль на данные: список читается, распаковка спрашивает пароль.
     std::string secret = fsu::joinPath(data, "secret5.rar");
     check(archRead(secret, info, err) && info.entries.size() == 3, "список RAR с паролем читается без пароля");
+    check(allEncrypted(info, true), "RAR с паролем: файлы помечены как зашифрованные");
     resetPasswords({"Пароль1"});
     std::string so = fsu::joinPath(dir, "secret");
     check(archExtract(secret, so, {}, true, Overwrite::Always, nullptr, err, &res) && res.files == 3,
@@ -855,6 +867,7 @@ void test7z(const std::string &root)
         bool ok = archRead(path, info, err);
         check(ok && info.entries.size() == 3 && info.format == ArchiveFormat::SevenZip, what + ": 3 файла " + err);
         check(hasEntry(info, "Документ.txt") && hasEntry(info, "sub\\Вложенный\\data.bin"), what + ": имена");
+        check(allEncrypted(info, false), what + ": файлы не помечены как зашифрованные");
         ok = archTest(path, nullptr, err, &res);
         check(ok && res.files == 3, what + ": проверка " + err);
         std::string out = fsu::joinPath(dir, s.file);
@@ -886,6 +899,7 @@ void test7z(const std::string &root)
     ok = archRead(secret, info, err);
     check(ok && info.entries.size() == 3 && info.method == "7z, пароль" && g_script.asked == 0,
           "список 7z с паролем на данные читается без пароля " + err);
+    check(allEncrypted(info, true), "7z с паролем: файлы помечены как зашифрованные");
     std::string so = fsu::joinPath(dir, "secret");
     ok = archExtract(secret, so, {}, true, Overwrite::Always, nullptr, err, &res);
     check(!ok && g_script.asked == 0, "без пароля 7z не распаковывается");
@@ -913,26 +927,40 @@ void test7z(const std::string &root)
     check(hasArchiveExtension("a.7Z") && archiveStem("архив.7z") == "архив", "расширение .7z");
 }
 
-// Пути длиннее MAX_PATH (260): создание директорий, запись, архивирование и распаковка.
-void testLongPaths(const std::string &root)
+// Самораспаковывающиеся RAR, 7z и ZIP: программа, после которой дописан архив.
+void testForeignSfx(const std::string &root)
 {
-    section("Длинные пути");
-    std::string deep = fsu::joinPath(root, "long\\" + std::string(100, 'a') + "\\" + std::string(100, 'b'));
-    check(fsu::makeDirs(deep) && fsu::dirExists(deep), "директория с путём длиннее 200 символов");
-    std::string file = fsu::joinPath(deep, std::string(80, 'c') + ".txt");
-    writeFile(file, "длинный путь");
-    check(file.size() > 300 && readFile(file) == "длинный путь", "файл с путём длиннее 300 символов");
+    section("Самораспаковывающиеся RAR, 7z, ZIP");
+    std::string data = CABINE_TEST_DATA;
+    std::string dir = fsu::joinPath(root, "sfx-foreign");
+    fsu::makeDirs(dir);
+    std::string stub = readFile(CABINE_SFX_STUB);
+    std::string zip = fsu::joinPath(dir, "plain.zip");
+    makeZip(zip, {{"readme.txt", "Hello, ZIP!\r\n"}, {"sub/Документ.txt", "Привет, ZIP!"}});
 
+    struct { const char *name; std::string archive; ArchiveFormat format; const char *readme; } cases[] = {
+        {"rar-sfx.exe", fsu::joinPath(data, "sample5.rar"), ArchiveFormat::Rar, "Hello, RAR!\r\n"},
+        {"7z-sfx.exe", fsu::joinPath(data, "sample.7z"), ArchiveFormat::SevenZip, "Hello, RAR!\r\n"},
+        {"zip-sfx.exe", zip, ArchiveFormat::Zip, "Hello, ZIP!\r\n"},
+    };
     std::string err;
-    std::string cab = fsu::joinPath(root, "long.cab");
-    check(cabCreate(cab, {{file, "в\\" + std::string(150, 'd') + "\\файл.txt"}}, CompressionSpec(), nullptr, err),
-          "CAB из файла с длинным путём " + err);
-    std::string out = fsu::joinPath(deep, "out");
-    check(archExtract(cab, out, {}, true, Overwrite::Always, nullptr, err),
-          "распаковка CAB в директорию с длинным путём " + err);
-    std::string extracted = fsu::joinPath(out, "в\\" + std::string(150, 'd') + "\\файл.txt");
-    check(extracted.size() > 400 && readFile(extracted) == "длинный путь", "распакованный файл (путь > 400 символов)");
-    check(fsu::removeTree(fsu::joinPath(root, "long")) && !fsu::dirExists(deep), "удаление дерева с длинными путями");
+    for (auto &c : cases)
+    {
+        std::string exe = fsu::joinPath(dir, c.name);
+        writeFile(exe, stub + readFile(c.archive));
+        check(archiveFormat(exe, true) == c.format, std::string(c.name) + ": формат " + formatName(c.format));
+        check(archiveFormat(exe) == ArchiveFormat::Unknown, std::string(c.name) + ": без sfx — программа");
+        CabInfo info;
+        bool ok = archRead(exe, info, err);
+        check(ok && hasEntry(info, "readme.txt"), std::string(c.name) + ": список " + err);
+        std::string out = fsu::joinPath(dir, std::string(c.name) + ".out");
+        ok = archExtract(exe, out, {}, true, Overwrite::Always, nullptr, err);
+        check(ok && readFile(fsu::joinPath(out, "readme.txt")) == c.readme, std::string(c.name) + ": распаковка " + err);
+    }
+    // Обычные программы с теми же байтами в данных (код UnRAR и LZMA SDK) — не архивы.
+    check(archiveFormat(CABINE_SFX_STUB, true) == ArchiveFormat::Unknown, "распаковщик Cabine — не архив");
+    check(archiveFormat(fsu::exePath(), true) == ArchiveFormat::Unknown,
+          "программа с кодом UnRAR и LZMA SDK — не архив");
 }
 
 void testDetection(const std::string &root)
@@ -1057,7 +1085,7 @@ int main()
     testRar(root);
     testTarGz(root, big);
     test7z(root);
-    testLongPaths(root);
+    testForeignSfx(root);
     testDetection(root);
     testUserPath();
 

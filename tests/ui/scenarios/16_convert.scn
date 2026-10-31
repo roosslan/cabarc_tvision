@@ -1,0 +1,19 @@
+# -c: 7z, RAR, ZIP и TAR.GZ преобразуются в CAB рядом с ними; структура как в исходном,
+# исходные архивы остаются; занятое имя — «имя (2).cab».
+#remove {WORK}\conv
+#copy {TESTDATA}\sample.7z | {WORK}\conv\s7.7z
+#copy {TESTDATA}\sample5.rar | {WORK}\conv\srar.rar
+#zip {DATA}\src | {WORK}\conv\szip.zip
+#copy {TESTDATA}\src.tar.gz | {WORK}\conv\stgz.tar.gz
+#copy {DATA}\test.cab | {WORK}\conv\szip.cab
+size 100 30
+run "{CABINE}" -c "{WORK}\conv\s7.7z" "{WORK}\conv\srar.rar" "{WORK}\conv\szip.zip" "{WORK}\conv\stgz.tar.gz"
+exit 30000
+#expect-cab-same {WORK}\conv\s7.cab | {DATA}\src
+#expect-cab-same {WORK}\conv\srar.cab | {DATA}\src
+#expect-cab-same {WORK}\conv\szip (2).cab | {DATA}\src
+#expect-file {WORK}\conv\stgz.cab
+#expect-file {WORK}\conv\s7.7z
+#expect-file {WORK}\conv\srar.rar
+#expect-file {WORK}\conv\szip.zip
+#expect-file {WORK}\conv\stgz.tar.gz

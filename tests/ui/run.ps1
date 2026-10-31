@@ -8,10 +8,12 @@
 # Служебные строки (аргументы разделяются символом |), выполняются до запуска:
 #   #copy ИСТОЧНИК | НАЗНАЧЕНИЕ      #copydir ИСТОЧНИК | НАЗНАЧЕНИЕ     #remove ПУТЬ
 #   #random ПУТЬ | БАЙТ              #zip ДИРЕКТОРИЯ | ФАЙЛ.zip
+#   #concat ФАЙЛ | ФАЙЛ | РЕЗУЛЬТАТ       (склейка, например программа + архив = SFX)
 # и после завершения сценария:
 #   #expect-file ПУТЬ                #expect-same ДИРЕКТОРИЯ | ДИРЕКТОРИЯ
 #   #expect-missing ПУТЬ
 #   #expect-contains ФАЙЛ | ТЕКСТ
+#   #expect-cab-same ФАЙЛ.cab | ДИРЕКТОРИЯ  (CAB распаковывается системным expand.exe)
 # Настройки программы хранятся в {WORK}\settings (переменная CABINE_SETTINGS_DIR),
 # настройки пользователя не затрагиваются.
 param(
@@ -67,6 +69,11 @@ function Setup([string]$cmd, [string[]]$a) {
             EnsureParent $a[1]; Copy-Item -LiteralPath $a[0] -Destination $a[1] -Recurse
         }
         'remove' { if (Test-Path -LiteralPath $a[0]) { Remove-Item -LiteralPath $a[0] -Recurse -Force } }
+        'concat' {
+            EnsureParent $a[2]
+            $bytes = [IO.File]::ReadAllBytes($a[0]) + [IO.File]::ReadAllBytes($a[1])
+            [IO.File]::WriteAllBytes($a[2], [byte[]]$bytes)
+        }
         'random' {
             EnsureParent $a[0]
             $bytes = New-Object byte[] ([int]$a[1])
@@ -109,6 +116,15 @@ function Check([string]$cmd, [string[]]$a) {
         'expect-file' { if (-not (Test-Path -LiteralPath $a[0])) { return "нет файла $($a[0])" } }
         'expect-missing' { if (Test-Path -LiteralPath $a[0]) { return "остался $($a[0])" } }
         'expect-same' { return (SameTree $a[0] $a[1]) }
+        'expect-cab-same' {
+            if (-not (Test-Path -LiteralPath $a[0])) { return "нет файла $($a[0])" }
+            $out = "$($a[0]).out"
+            if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force }
+            New-Item -ItemType Directory $out | Out-Null
+            & (Join-Path $env:SystemRoot 'System32\expand.exe') $a[0] '-F:*' $out | Out-Null
+            if ($LASTEXITCODE -ne 0) { return "expand.exe не распаковал $($a[0]): код $LASTEXITCODE" }
+            return (SameTree $a[1] $out)
+        }
         'expect-contains' {
             if (-not (Test-Path -LiteralPath $a[0])) { return "нет файла $($a[0])" }
             $text = Get-Content -LiteralPath $a[0] -Raw -Encoding Default

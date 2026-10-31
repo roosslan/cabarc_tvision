@@ -11,6 +11,7 @@
 // cabine-shell.exe -e <путь>   распаковать архив в поддиректорию с его именем
 // cabine-shell.exe -ai <путь>  добавить в архив, имя которого задаётся в окне
 // cabine-shell.exe -ei <путь>  распаковать архив в директорию, заданную в окне
+// cabine-shell.exe -c <путь>   преобразовать архив в CAB
 
 #include <windows.h>
 
@@ -37,6 +38,7 @@ std::wstring channelName(const std::string &mode)
                         : mode == "-ai" ? L".AddAsk."
                         : mode == "-x"  ? L".Extract."
                         : mode == "-e"  ? L".ExtractDir."
+                        : mode == "-c"  ? L".Convert."
                                         : L".ExtractAsk.";
     return std::wstring(L"Cabine.Shell") + kind +
            std::to_wstring(session);
@@ -188,7 +190,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 {
     std::vector<std::string> args = fsu::commandLineArgs();
     if (args.size() < 2 || (args[0] != "-a" && args[0] != "-ai" && args[0] != "-x" &&
-                            args[0] != "-e" && args[0] != "-ei"))
+                            args[0] != "-e" && args[0] != "-ei" && args[0] != "-c"))
     {
         MessageBoxW(nullptr,
                     L"cabine-shell.exe вызывается из контекстного меню Проводника:\n"
@@ -196,7 +198,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
                     L"cabine-shell.exe -x <путь>  — распаковать архив\n"
                     L"cabine-shell.exe -e <путь>  — распаковать архив в поддиректорию\n"
                     L"cabine-shell.exe -ai <путь> — добавить в архив (имя задаётся в окне)\n"
-                    L"cabine-shell.exe -ei <путь> — распаковать архив (директория задаётся в окне)",
+                    L"cabine-shell.exe -ei <путь> — распаковать архив (директория задаётся в окне)\n"
+                    L"cabine-shell.exe -c <путь>  — преобразовать архив в CAB",
                     L"Cabine", MB_ICONINFORMATION);
         return 2;
     }

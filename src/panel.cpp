@@ -90,7 +90,8 @@ std::string cellText(const PanelItem &it, ColumnId id, bool archiveMode)
                 return "..";
             if (it.kind == ItemKind::Drive)
                 return "[" + it.name.substr(0, 2) + "]";
-            return it.name;
+            // Зашифрованный файл в архиве помечается звёздочкой, как в WinRAR.
+            return it.encrypted ? it.name + " *" : it.name;
         case ColumnId::Size:
             switch (it.kind)
             {
@@ -601,6 +602,7 @@ void TPanelWindow::loadArchiveItems()
             f.time = e.time;
             f.attribs = e.attribs;
             f.entry = (int) i;
+            f.encrypted = e.encrypted;
             items.push_back(std::move(f));
             continue;
         }
