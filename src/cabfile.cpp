@@ -117,7 +117,7 @@ bool readSz(FILE *f, std::string &s)
 
 INT_PTR openFile(const char *path, int oflag, int pmode)
 {
-    return _wopen(fsu::widen(path).c_str(), oflag | _O_BINARY, pmode);
+    return _wopen(fsu::sysPath(path).c_str(), oflag | _O_BINARY, pmode);
 }
 
 // Начало архива в файле: 0, если файл начинается с "MSCF", либо конец образа
@@ -183,7 +183,7 @@ bool copyBytes(FILE *from, FILE *to, uint64_t n)
 
 void applyFileInfo(const std::string &path, USHORT date, USHORT time, USHORT attribs)
 {
-    std::wstring w = fsu::widen(path);
+    std::wstring w = fsu::sysPath(path);
     HANDLE h = CreateFileW(w.c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE,
                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h != INVALID_HANDLE_VALUE)
@@ -332,7 +332,7 @@ INT_PTR FdiContext::copyFile(PFDINOTIFICATION p)
         error = "Не удалось создать директорию " + dir + "\n" + fsu::lastErrorText();
         return -1;
     }
-    int fd = _wopen(fsu::widen(out).c_str(), _O_BINARY | _O_CREAT | _O_TRUNC | _O_WRONLY,
+    int fd = _wopen(fsu::sysPath(out).c_str(), _O_BINARY | _O_CREAT | _O_TRUNC | _O_WRONLY,
                     _S_IREAD | _S_IWRITE);
     if (fd == -1)
     {
@@ -600,7 +600,7 @@ FNFCISTATUS(fciStatus)
 FNFCIGETOPENINFO(fciOpenInfo)
 {
     FciContext &c = *static_cast<FciContext *>(pv);
-    std::wstring w = fsu::widen(pszName);
+    std::wstring w = fsu::sysPath(pszName);
     WIN32_FILE_ATTRIBUTE_DATA fad;
     if (!GetFileAttributesExW(w.c_str(), GetFileExInfoStandard, &fad))
     {
@@ -661,7 +661,7 @@ static bool cabReadVolume(const std::string &path, CabInfo &info, std::string &e
 {
     info = CabInfo();
     info.path = path;
-    FILE *f = _wfopen(fsu::widen(path).c_str(), L"rb");
+    FILE *f = _wfopen(fsu::sysPath(path).c_str(), L"rb");
     if (!f)
     {
         err = "Не удалось открыть файл " + path + "\n" + fsu::lastErrorText();
@@ -822,7 +822,7 @@ std::string cabVolumeName(const std::string &firstVolume, int n)
 
 bool cabHasSignature(const std::string &path, bool sfx)
 {
-    FILE *f = _wfopen(fsu::widen(path).c_str(), L"rb");
+    FILE *f = _wfopen(fsu::sysPath(path).c_str(), L"rb");
     if (!f)
         return false;
     uint64_t offset = 0;
@@ -1021,8 +1021,8 @@ bool cabCreate(const std::string &cabPath, const std::vector<CabSource> &filesIn
     {
         // Самораспаковывающийся архив: программа-распаковщик, за ней CAB.
         std::string sfxPath = cabPath + ".sfx~";
-        FILE *in = _wfopen(fsu::widen(tmpPath).c_str(), L"rb");
-        FILE *out = _wfopen(fsu::widen(sfxPath).c_str(), L"wb");
+        FILE *in = _wfopen(fsu::sysPath(tmpPath).c_str(), L"rb");
+        FILE *out = _wfopen(fsu::sysPath(sfxPath).c_str(), L"wb");
         bool written = in && out && fwrite(prefix.data(), 1, prefix.size(), out) == prefix.size() &&
                        copyBytes(in, out, UINT64_MAX);
         if (out && fclose(out) != 0)
@@ -1100,7 +1100,7 @@ bool cabUpdate(const std::string &cabPath, const std::vector<std::string> &remov
     std::string prefix;
     if (info.offset)
     {
-        FILE *f = _wfopen(fsu::widen(cabPath).c_str(), L"rb");
+        FILE *f = _wfopen(fsu::sysPath(cabPath).c_str(), L"rb");
         prefix.resize((size_t) info.offset);
         bool read = f && readExact(f, &prefix[0], prefix.size());
         if (f)

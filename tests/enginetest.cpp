@@ -49,7 +49,7 @@ void section(const std::string &name)
 void writeFile(const std::string &path, const std::string &data)
 {
     fsu::makeDirs(fsu::dirName(path));
-    FILE *f = _wfopen(fsu::widen(path).c_str(), L"wb");
+    FILE *f = _wfopen(fsu::sysPath(path).c_str(), L"wb");
     if (!f)
         return;
     fwrite(data.data(), 1, data.size(), f);
