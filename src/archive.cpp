@@ -400,7 +400,12 @@ bool zipExtract(ExtractJob &j)
             }
             sr = mz_zip_reader_entry_save(z.h, &sink, zipWrite);
             mz_zip_reader_entry_close(z.h);
-            if (sr != MZ_PASSWORD_ERROR || !encrypted || j.cancelled)
+            // PKWARE проверяет пароль по одному байту заголовка: примерно один неверный
+            // пароль из 256 эту проверку проходит, и ошибка видна только как ошибка
+            // данных или CRC. Для зашифрованного файла это тоже повод спросить пароль снова.
+            bool wrongPassword = sr == MZ_PASSWORD_ERROR ||
+                                 (havePassword && (sr == MZ_DATA_ERROR || sr == MZ_CRC_ERROR));
+            if (!wrongPassword || !encrypted || j.cancelled)
                 break;
             forgetPassword(j.path);
             retry = true;

@@ -547,6 +547,34 @@ void testZip(const std::string &root, const std::string &big)
         resetPasswords({});
         check(archTest(path, nullptr, err), "введённый пароль запомнен для архива");
     }
+
+    // PKWARE проверяет пароль по одному байту: примерно один неверный пароль из 256
+    // проходит проверку, и ошибка обнаруживается только при распаковке (данные или CRC).
+    // Такой пароль подбирается перебором; после него пароль должен спрашиваться снова.
+    std::string pk = fsu::joinPath(dir, "pkware.zip");
+    std::string lucky;
+    void *rd = mz_zip_reader_create();
+    if (mz_zip_reader_open_file(rd, pk.c_str()) == MZ_OK && mz_zip_reader_goto_first_entry(rd) == MZ_OK)
+        for (int k = 0; k < 20000 && lucky.empty(); ++k)
+        {
+            std::string candidate = "неверный" + std::to_string(k);
+            mz_zip_reader_set_password(rd, candidate.c_str());
+            if (mz_zip_reader_entry_open(rd) == MZ_OK)
+                lucky = candidate;
+            mz_zip_reader_entry_close(rd);
+        }
+    mz_zip_reader_close(rd);
+    mz_zip_reader_delete(&rd);
+    check(!lucky.empty(), "найден неверный пароль, проходящий проверку PKWARE: " + lucky);
+    // Копия: для исходного архива верный пароль уже запомнен.
+    std::string pkCopy = fsu::joinPath(dir, "pkware-lucky.zip");
+    CopyFileW(fsu::widen(pk).c_str(), fsu::widen(pkCopy).c_str(), FALSE);
+    resetPasswords({lucky, "Пароль1"});
+    std::string lo = fsu::joinPath(dir, "out_lucky");
+    check(archExtract(pkCopy, lo, {}, true, Overwrite::Always, nullptr, err, &res) && res.files == 2 &&
+              g_script.asked == 2 && g_script.retries == 1,
+          "пароль, прошедший проверку байта, но неверный, спрошен снова " + err);
+    check(readFile(fsu::joinPath(lo, "секрет.txt")) == "тайна", "после повторного ввода содержимое верное");
     std::string noPw = fsu::joinPath(dir, "nopw.zip");
     makeZip(noPw, {{"x.txt", "x"}}, "abc");
     resetPasswords({});
