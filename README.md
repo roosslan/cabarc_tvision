@@ -119,3 +119,39 @@ modified; Cabine works around its limitations in its own code:
   > software is permitted, provided that full text of this paragraph, starting from
   > "UnRAR source code" words, is included in license, or in documentation if license
   > is not available, and in source code comments of resulting package.
+
+## CI and releases
+
+GitHub Actions builds Windows x64 on pushes to `trunk`, `fix/**`, `feature/**`,
+all pull requests, and manual runs. It runs engine and ConPTY UI tests, then
+builds and verifies two packages from the same payload:
+
+- `cabine-<version>-x64-setup.exe`: single-file installer built with
+  [XPSetup](https://github.com/roosslan/cabxp64_installer), pinned to v1.0.0.
+  Installs for the current user into `%LOCALAPPDATA%\Programs\Cabine` by default,
+  adds Start menu shortcuts and an entry in Installed Apps for uninstallation.
+- `cabine-<version>-x64-portable.cab`: extract the entire CAB into any directory
+  and run `cabine.exe`. No installer or registration is required. Settings still
+  use `%APPDATA%\Cabine`, as described above.
+- `SHA256SUMS.txt`: SHA-256 checksums of both packages.
+
+Both packages include `cabine.exe`, `cabine-shell.exe`, documentation and third-party
+license notices. Explorer integration remains available through `--register` and
+`--unregister`; the installer does not register it automatically.
+
+To publish, update `src/version.h` (including the numeric version macros), merge
+into `trunk`, then push a matching tag, for example `v2.3`. A tag that does not match
+`CABINE_VERSION` fails validation. Successful tag builds publish a GitHub Release;
+branch and PR builds only upload Actions artifacts. A release stays a draft until
+all files have uploaded. Published releases are never overwritten on a retry.
+No deployment environment or extra secret is needed: publication uses the built-in
+`GITHUB_TOKEN` with write permission only in the release job.
+
+To reproduce packaging locally after building:
+
+```powershell
+./tools/ci/package.ps1 -Version 2.3
+# Use the payload directory printed by the command:
+xpsbuild.exe --build installer/cabine.xsp --version 2.3 --mode single --out build/installer --define "CABINE_PACKAGE=<absolute payload path>"
+./tools/ci/verify-installer.ps1 -Installer build/installer/cabine-setup.exe -Payload '<absolute payload path>' -Version 2.3
+```
