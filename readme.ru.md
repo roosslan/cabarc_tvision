@@ -118,3 +118,39 @@ CAB-архив» и «Добавить в архив ...». Директория
   > software is permitted, provided that full text of this paragraph, starting from
   > "UnRAR source code" words, is included in license, or in documentation if license
   > is not available, and in source code comments of resulting package.
+
+## CI и релизы
+
+GitHub Actions собирает Windows x64 при push в `trunk`, `fix/**`, `feature/**`,
+при pull request и ручном запуске. После тестов ядра и интерфейса через ConPTY
+из одного набора файлов создаются и проверяются:
+
+- `cabine-<версия>-x64-setup.exe` — однофайловый установщик на
+  [XPSetup](https://github.com/roosslan/cabxp64_installer), закреплённом на v1.0.0.
+  Установка для текущего пользователя по умолчанию в `%LOCALAPPDATA%\Programs\Cabine`,
+  ярлыки в меню «Пуск», удаление через список установленных приложений Windows.
+- `cabine-<версия>-x64-portable.cab` — распакуйте CAB целиком в любую директорию
+  и запустите `cabine.exe`. Установка и регистрация не нужны; настройки по-прежнему
+  сохраняются в `%APPDATA%\Cabine`.
+- `SHA256SUMS.txt` — SHA-256 обоих пакетов.
+
+Оба пакета содержат `cabine.exe`, `cabine-shell.exe`, документацию и тексты лицензий
+библиотек. Интеграция с Проводником включается через `--register` и отключается
+через `--unregister`; установщик автоматически её не включает.
+
+Для выпуска обновите `src/version.h` (включая числовые макросы версии), влейте
+изменения в `trunk` и отправьте совпадающий тег, например `v2.3`. Несовпадение тега
+с `CABINE_VERSION` останавливает сборку. Успешная сборка тега публикует GitHub Release;
+сборки веток и PR сохраняют только артефакты Actions. До загрузки всех файлов релиз
+остаётся черновиком. Повторный запуск не перезаписывает опубликованный релиз.
+Отдельный deployment и дополнительные секреты не нужны: используется встроенный
+`GITHUB_TOKEN`, право записи выдаётся только задаче публикации.
+
+Локальная упаковка после сборки:
+
+```powershell
+./tools/ci/package.ps1 -Version 2.3
+# Подставьте абсолютный путь payload, напечатанный предыдущей командой:
+xpsbuild.exe --build installer/cabine.xsp --version 2.3 --mode single --out build/installer --define "CABINE_PACKAGE=<путь payload>"
+./tools/ci/verify-installer.ps1 -Installer build/installer/cabine-setup.exe -Payload '<путь payload>' -Version 2.3
+```

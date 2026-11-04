@@ -1,0 +1,38 @@
+; CI supplies CABINE_PACKAGE and the version from src/version.h.
+[Version]
+Signature = "$XPSetup$"
+SifVersion = 1
+
+[Product]
+Name = Cabine
+Version = 2.3
+Publisher = roosslan
+ProductCode = {4BBAC70E-9A92-4C27-A021-2FF92073F06B}
+InstallDir = %LOCALAPPDATA%\Programs\Cabine
+AllowChangeDir = 1
+Scope = user
+Icon = ..\app.ico
+
+[Directories]
+1 = %INSTALLDIR%
+
+[Components]
+program
+
+[Component.program]
+Description = Cabine
+Cabinet = cabine.cab
+Directory = 1
+Source = %CABINE_PACKAGE%
+Include = *
+Recurse = 1
+
+[Shortcuts]
+Programs, "Cabine\Cabine", "%INSTALLDIR%\cabine.exe", "", "%INSTALLDIR%"
+Programs, "Cabine\Readme", "%INSTALLDIR%\readme.ru.md"
+
+[Build]
+Output = dist
+SingleFile = cabine-setup.exe
+Mode = single
+Compression = LZX:21

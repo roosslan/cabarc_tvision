@@ -1,10 +1,8 @@
-# Сборка и тесты на каждый push в trunk и на каждый pull request;
-# на тег вида v2.2 — дополнительно выпуск релиза с собранной программой.
-name: Сборка
+name: Build and release
 
 on:
   push:
-    branches: [trunk]
+    branches: [trunk, 'fix/**', 'feature/**']
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -12,102 +10,154 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
   build:
-    name: Сборка и тесты (Windows x64)
-    runs-on: windows-latest
+    name: Windows x64 - build, test, package
+    runs-on: windows-2022
+    timeout-minutes: 30
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Получение исходников с субмодулем tvision
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Версия программы
+      - name: Read and validate version
         id: version
         shell: pwsh
         run: |
-          $m = Select-String -Path src/version.h -Pattern 'CABINE_VERSION "([^"]+)"'
-          $v = $m.Matches[0].Groups[1].Value
-          "version=$v" >> $env:GITHUB_OUTPUT
-          Write-Host "Версия: $v"
-          # Для релиза тег должен совпадать с версией в src/version.h.
-          if ($env:GITHUB_REF -like 'refs/tags/v*') {
-            $tag = $env:GITHUB_REF_NAME.Substring(1)
-            if ($tag -ne $v) {
-              Write-Error "Тег v$tag не совпадает с версией $v в src/version.h"
-              exit 1
-            }
+          $ErrorActionPreference = 'Stop'
+          $text = Get-Content src/version.h -Raw
+          if ($text -notmatch '(?m)^#define CABINE_VERSION "(\d+(?:\.\d+){0,3})"\s*$') {
+            throw 'Invalid CABINE_VERSION in src/version.h'
           }
+          $version = $Matches[1]
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$version") {
+            throw "Tag must be v$version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
 
-      - name: Конфигурирование
-        run: cmake -S . -B build -A x64
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCABINE_TESTS=ON
 
-      - name: Сборка
+      - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Тесты
-        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure --timeout 900
 
-      # Пакет — CAB-архив (LZX:21), созданный системным makecab.exe; файлы
-      # лежат в нём в директории cabine-<версия>-x64.
-      - name: Пакет
-        shell: pwsh
-        run: |
-          $v = "${{ steps.version.outputs.version }}"
-          $pkg = "cabine-$v-x64"
-          New-Item -ItemType Directory -Force dist | Out-Null
-          $ddf = @(
-            '.OPTION EXPLICIT'
-            ".Set CabinetNameTemplate=$pkg.cab"
-            '.Set DiskDirectoryTemplate=dist'
-            '.Set Cabinet=on'
-            '.Set Compress=on'
-            '.Set CompressionType=LZX'
-            '.Set CompressionMemory=21'
-            '.Set MaxDiskSize=0'
-            '.Set RptFileName=NUL'
-            '.Set InfFileName=NUL'
-            ".Set DestinationDir=$pkg"
-            '"build\Release\cabine.exe"'
-            '"build\Release\cabine-shell.exe"'
-            '"README.md"'
-            '"readme.ru.md"'
-          )
-          $ddf | Set-Content -Encoding ascii package.ddf
-          makecab.exe /F package.ddf
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $hash = (Get-FileHash "dist/$pkg.cab" -Algorithm SHA256).Hash.ToLower()
-          "$hash  $pkg.cab" | Out-File -Encoding ascii "dist/$pkg.cab.sha256"
-
-      - name: Сохранение сборки
+      - name: Save test logs
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
+          name: test-logs
+          path: build/Testing/Temporary/
+
+      - name: Build and verify portable CAB
+        id: package
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: ./tools/ci/package.ps1 -Version $env:VERSION
+
+      # XPSetup v1.0.0. Build the pinned sources instead of downloading latest binaries.
+      - name: Get XPSetup
+        uses: actions/checkout@v4
+        with:
+          repository: roosslan/cabxp64_installer
+          ref: 39ca1c233bfcba7171a7f2175176c8830173ef36
+          submodules: recursive
+          path: .ci/xpsetup
+          persist-credentials: false
+
+      - name: Build XPSetup
+        shell: pwsh
+        run: |
+          cmake -S .ci/xpsetup -B .ci/xpsetup/build -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build .ci/xpsetup/build --config Release --target xpsbuild --parallel
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Build installer with XPSetup
+        id: installer
+        uses: ./.ci/xpsetup
+        with:
+          project: installer/cabine.xsp
+          version: ${{ steps.version.outputs.version }}
+          mode: single
+          out: build/installer
+          xpsbuild: .ci/xpsetup/build/Release/xpsbuild.exe
+          defines: |
+            CABINE_PACKAGE=${{ steps.package.outputs.payload }}
+
+      - name: Verify installer payload
+        shell: pwsh
+        env:
+          INSTALLER: ${{ steps.installer.outputs.single }}
+          PAYLOAD: ${{ steps.package.outputs.payload }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: ./tools/ci/verify-installer.ps1 -Installer $env:INSTALLER -Payload $env:PAYLOAD -Version $env:VERSION
+
+      - name: Collect installer and checksums
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          INSTALLER: ${{ steps.installer.outputs.single }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item -LiteralPath $env:INSTALLER -Destination "dist/cabine-$env:VERSION-x64-setup.exe"
+          $assets = @(Get-ChildItem dist -File | Where-Object { $_.Extension -in '.cab', '.exe' } | Sort-Object Name)
+          if ($assets.Count -ne 2) { throw 'Expected portable CAB and installer EXE' }
+          $assets | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content -Encoding ascii dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
           name: cabine-${{ steps.version.outputs.version }}-x64
+          if-no-files-found: error
           path: |
             dist/*.cab
-            dist/*.sha256
+            dist/*.exe
+            dist/SHA256SUMS.txt
 
   release:
-    name: Релиз
+    name: Publish GitHub Release
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
-      - name: Получение сборки
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: cabine-${{ needs.build.outputs.version }}-x64
           path: dist
 
-      - name: Создание релиза
+      - name: Verify assets
+        working-directory: dist
+        run: sha256sum --check SHA256SUMS.txt
+
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Cabine ${{ needs.build.outputs.version }}" \
-            --generate-notes
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          # A retry may update a draft, but must never replace a published release.
+          if gh release view "$tag" --json isDraft >/dev/null 2>&1; then
+            test "$(gh release view "$tag" --json isDraft --jq .isDraft)" = true
+          else
+            gh release create "$tag" --verify-tag --draft \
+              --title "Cabine $VERSION" --generate-notes
+          fi
+          gh release upload "$tag" dist/* --clobber
+          gh release edit "$tag" --draft=false
